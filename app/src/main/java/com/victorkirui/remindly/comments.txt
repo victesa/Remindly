@@ -1,0 +1,26 @@
+# Project Review and Redo Comments
+
+## What was Right
+1.  **Modularization**: The project is split into `core`, `app`, `module-features`, and `module-sources`.
+2.  **Room Setup**: Using Room for local storage is correct.
+3.  **Sealed Classes**: Good use of sealed classes for `ShareContent`.
+
+## What was Improved/Redone (Updated)
+1.  **Unique IDs**: Replaced `hashCode()` with `UUID` strings.
+2.  **Clean Architecture**: Removed Android imports from UseCase; used a pure Kotlin `timestampProvider`.
+3.  **Insert/Update Logic**: Used `OnConflictStrategy.REPLACE` in `ItemDao`.
+4.  **Real Networking & Auth**: Implemented Retrofit with the Dev Tunnel URL and added a Bearer Auth Token interceptor.
+5.  **Notifications**:
+    *   Created `NotificationHelper` in `:core`.
+    *   Integrated notifications into `CapturingViewModel`.
+    *   `MainActivity` now triggers background notifications if the app is "not alive" when receiving an intent.
+6.  **Error Handling**:
+    *   UseCase now returns a `CaptureResult` (Success, Error, SavedLocallyOnly).
+    *   ViewModel handles these results and updates the UI and notifications accordingly.
+7.  **Kotlin 2.0 / Compose Fixes**:
+    *   Applied `alias(libs.plugins.kotlin.compose)` to all modules using Compose.
+    *   Fixed a plugin clash that was preventing the project from building.
+
+## Missing/Next Steps
+1.  **Background Sync**: Use WorkManager to process items in the `PendingSync` table when the connection is restored.
+2.  **Permission UI**: Add a UI prompt to ask for `POST_NOTIFICATIONS` permission on Android 13+.

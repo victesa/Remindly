@@ -1,0 +1,3 @@
+<resources>
+    <!-- Web Client ID is now injected from local.properties via build.gradle.kts -->
+</resources>

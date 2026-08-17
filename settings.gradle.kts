@@ -24,3 +24,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "Remindly"
 include(":app")
+include(":core")
+include(":module-features")
+include(":module-sources")
+include(":module-sources:local")
+include(":module-sources:remote")
