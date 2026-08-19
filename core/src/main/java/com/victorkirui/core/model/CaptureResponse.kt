@@ -1,7 +1,14 @@
 package com.victorkirui.core.model
 
 data class CaptureResponse(
-    val item: RemoteItem
+    val item: RemoteItem,
+    val extraction: ExtractionInfo? = null
+)
+
+data class ExtractionInfo(
+    val strategy: String,
+    val confidence: Double,
+    val ocrQualityScore: Double
 )
 
 data class RemoteItem(

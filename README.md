@@ -12,7 +12,7 @@ Remindly is a modern, AI-powered Android application designed to help you captur
 |:---------------------------------------:|:--------------------------------------------:|
 | ![Reminders](screenshots/reminders.jpg) | ![Reminder Details](screenshots/details.jpg) |
 
-## ✨ Features
+## Features
 
 - **Multi-Modal AI Capture**: Capture content via shared text, images (OCR powered by ML Kit), or PDF documents.
 - **Intelligent Data Extraction**: Custom AI backend (Cloudflare Workers + Gemini) extracts titles, summaries, deadlines, and organizations automatically.
@@ -21,7 +21,7 @@ Remindly is a modern, AI-powered Android application designed to help you captur
 - **Responsive Design**: Optimized UI for different screen sizes (Compact, Medium, Expanded) using Jetpack Compose `WindowSizeClass`.
 - **Secure Authentication**: Firebase Auth with support for Google Sign-In and Email/Password.
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - **Language**: Kotlin
 - **UI Framework**: Jetpack Compose
@@ -33,7 +33,7 @@ Remindly is a modern, AI-powered Android application designed to help you captur
 - **AI/ML**: Google ML Kit (on-device OCR) + Gemini API (backend)
 - **Security**: Firebase ID-token authentication with OkHttp Interceptors
 
-## 🏗 Project Structure
+## Project Structure
 
 ```
 ├── :app                    # Entry point, Main Activity, Global Navigation
@@ -44,7 +44,7 @@ Remindly is a modern, AI-powered Android application designed to help you captur
     └── :remote             # Retrofit implementation, API services, Interceptors
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
 1.  **Clone the repository**.
 2.  **Firebase Setup**: Add your `google-services.json` to the `app/` directory.
@@ -54,6 +54,6 @@ Remindly is a modern, AI-powered Android application designed to help you captur
     ```
 4.  **Build**: Open in Android Studio and run the `:app` module.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License.

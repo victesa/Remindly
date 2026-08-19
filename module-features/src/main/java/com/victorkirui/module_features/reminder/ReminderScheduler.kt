@@ -27,16 +27,34 @@ class ReminderScheduler(
     suspend fun scheduleRemindersForItem(item: Item) {
         val targetDateStr = item.deadline ?: item.eventDate ?: return
         val targetDate = try {
-            LocalDate.parse(targetDateStr, dateFormatter)
+            if (targetDateStr.contains("T")) {
+                if (targetDateStr.endsWith("Z")) {
+                    java.time.Instant.parse(targetDateStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                } else {
+                    LocalDateTime.parse(targetDateStr).toLocalDate()
+                }
+            } else if (targetDateStr.contains("-")) {
+                LocalDate.parse(targetDateStr, dateFormatter)
+            } else {
+                return
+            }
         } catch (e: Exception) {
+            android.util.Log.e("ReminderScheduler", "Failed to parse date: $targetDateStr", e)
             return
         }
         val today = LocalDate.now()
 
-        if (targetDate.isBefore(today)) return
+        if (targetDate.isBefore(today)) {
+            android.util.Log.d("ReminderScheduler", "Skipping reminders for past item: ${item.id}")
+            return
+        }
 
         val preferredTimeStr = settingsRepository.preferredReminderTime.first()
-        val preferredTime = LocalTime.parse(preferredTimeStr)
+        val preferredTime = try {
+            LocalTime.parse(preferredTimeStr)
+        } catch (e: Exception) {
+            LocalTime.of(8, 0)
+        }
 
         val daysUntil = ChronoUnit.DAYS.between(today, targetDate)
         val reminders = mutableListOf<Reminder>()
@@ -108,17 +126,21 @@ class ReminderScheduler(
         }
 
         // Save and Schedule Alarms
-        localRepository.deleteRemindersForItem(item.id)
-        val distinctReminders = reminders.distinctBy { it.reminderDateTime }
-        localRepository.saveReminders(distinctReminders)
-        
-        distinctReminders.forEach { scheduleAlarm(it) }
+        localRepository.withTransaction {
+            localRepository.deleteRemindersForItem(item.id)
+            val distinctReminders = reminders.distinctBy { it.reminderDateTime }
+            localRepository.saveReminders(distinctReminders)
+            
+            distinctReminders.forEach { scheduleAlarm(it) }
+        }
     }
 
     private fun scheduleAlarm(reminder: Reminder) {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra("item_id", reminder.itemId)
             putExtra("type", reminder.type)
+            // Ensure unique intent for each reminder
+            action = "com.victorkirui.remindly.ACTION_REMINDER_${reminder.itemId}_${reminder.type}"
         }
         
         val pendingIntent = PendingIntent.getBroadcast(
@@ -128,16 +150,24 @@ class ReminderScheduler(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val triggerAt = LocalDateTime.parse(reminder.reminderDateTime)
-            .atZone(ZoneId.systemDefault())
-            .toInstant()
-            .toEpochMilli()
+        val triggerAt = try {
+            LocalDateTime.parse(reminder.reminderDateTime)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        } catch (e: Exception) {
+            android.util.Log.e("ReminderScheduler", "Failed to parse trigger time: ${reminder.reminderDateTime}", e)
+            return
+        }
 
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            triggerAt,
-            pendingIntent
-        )
+        if (triggerAt > System.currentTimeMillis()) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+            android.util.Log.d("ReminderScheduler", "Scheduled alarm for ${reminder.itemId} at ${reminder.reminderDateTime}")
+        }
     }
 
     private fun createReminder(itemId: String, date: LocalDate, time: LocalTime, type: String): Reminder {

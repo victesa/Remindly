@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
@@ -11,6 +13,14 @@ android {
         minSdk = 24
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val localProperties = Properties()
+        val localPropertiesFile = project.rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localProperties.load(localPropertiesFile.inputStream())
+        }
+        val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -20,6 +30,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -53,4 +64,8 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.google.generative.ai)
+    implementation("com.google.code.gson:gson:2.10.1")
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.converter.gson)
 }

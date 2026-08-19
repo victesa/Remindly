@@ -23,9 +23,20 @@ class CaptureApiServiceImpl(
         return if (mediaUri != null) {
             val file = getFileFromUri(mediaUri)
             val extension = file.extension.lowercase()
-            val detectedMimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
             
-            Log.e("CaptureApiService", "Uploading file: ${file.name}, extension: $extension, mimeType: $detectedMimeType")
+            // 1. Try ContentResolver/Extension
+            var detectedMimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+            
+            // 2. Fallback to sniffing if ambiguous
+            if (detectedMimeType == null || detectedMimeType == "application/octet-stream") {
+                detectedMimeType = sniffMimeType(file) ?: when (request.contentType) {
+                    "DOCUMENT" -> "application/pdf"
+                    "IMAGE" -> "image/jpeg"
+                    else -> detectedMimeType ?: "application/octet-stream"
+                }
+            }
+            
+            Log.e("CaptureApiService", "Uploading file: ${file.name}, detectedMimeType: $detectedMimeType")
             
             val mediaPart = MultipartBody.Part.createFormData(
                 "media",
@@ -38,7 +49,9 @@ class CaptureApiServiceImpl(
             partMap["itemId"] = request.itemId.toRequestBody(textMediaType)
             partMap["contentType"] = request.contentType.toRequestBody(textMediaType)
             partMap["capturedAt"] = request.capturedAt.toRequestBody(textMediaType)
+            partMap["mimeType"] = detectedMimeType.toRequestBody(textMediaType)
             partMap["metadata"] = Gson().toJson(request.metadata).toRequestBody(textMediaType)
+            
             request.extractedText?.let {
                 partMap["extractedText"] = it.toRequestBody(textMediaType)
             }
@@ -55,13 +68,30 @@ class CaptureApiServiceImpl(
                 Log.e("CaptureApiService", "HTTP Error ${e.code()}: $errorBody")
                 throw e
             } finally {
-                // Only delete if it's a temporary cache file, not a persistent capture from internal storage
                 if (file.exists() && file.path.contains(context.cacheDir.path)) {
                     file.delete()
                 }
             }
         } else {
             api.captureJson(request)
+        }
+    }
+
+    private fun sniffMimeType(file: File): String? {
+        return try {
+            val bytes = ByteArray(4)
+            java.io.FileInputStream(file).use { it.read(bytes) }
+            val hex = bytes.joinToString("") { "%02X".format(it) }
+            
+            when {
+                hex.startsWith("25504446") -> "application/pdf"
+                hex.startsWith("FFD8FF") -> "image/jpeg"
+                hex.startsWith("89504E47") -> "image/png"
+                else -> null
+            }
+        } catch (e: Exception) {
+            Log.w("CaptureApiService", "Failed to sniff MIME type: ${e.message}")
+            null
         }
     }
 

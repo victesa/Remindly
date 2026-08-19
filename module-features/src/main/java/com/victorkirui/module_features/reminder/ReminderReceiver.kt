@@ -25,9 +25,18 @@ class ReminderReceiver : BroadcastReceiver(), KoinComponent {
         CoroutineScope(Dispatchers.IO).launch {
             val item = localRepository.getItem(itemId)
             if (item != null) {
+                // Ensure item is not DONE
+                if (item.status == "DONE") {
+                    Log.d("ReminderReceiver", "Skipping notification for DONE item: $itemId")
+                    return@launch
+                }
+
                 val title = when (type) {
                     "DEADLINE_APPROACHING" -> "Deadline Approaching!"
                     "MORNING_OF" -> "Action Needed Today"
+                    "7_DAYS_BEFORE" -> "Upcoming Deadline (7 days)"
+                    "2_DAYS_BEFORE" -> "Upcoming Deadline (2 days)"
+                    "TEST_ALARM" -> "Test Reminder"
                     else -> "Remindly Reminder"
                 }
                 notificationHelper.showNotification(title, item.title)

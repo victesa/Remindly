@@ -11,7 +11,10 @@ import com.victorkirui.local.repository.LocalRepository
 import com.victorkirui.module_features.reminder.ReminderScheduler
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.victorkirui.module_features.reminder.BriefingWorker
+import org.koin.core.component.KoinComponent
 import java.time.LocalDateTime
+import java.time.LocalTime
 
 class ProfileViewModel(
     private val settingsRepository: ReminderSettingsRepository,
@@ -20,7 +23,7 @@ class ProfileViewModel(
     private val notificationHelper: NotificationHelper,
     private val reminderScheduler: ReminderScheduler,
     private val localRepository: LocalRepository
-) : ViewModel() {
+) : ViewModel(), KoinComponent {
 
     val uiState: StateFlow<ProfileUiState> = combine(
         settingsRepository.preferredReminderTime,
@@ -52,6 +55,16 @@ class ProfileViewModel(
     fun updateReminderTime(time: String) {
         viewModelScope.launch {
             settingsRepository.setPreferredReminderTime(time)
+            // Reschedule briefing worker with new time
+            try {
+                val preferredTime = LocalTime.parse(time)
+                BriefingWorker.schedule(
+                    org.koin.core.context.GlobalContext.get().get(),
+                    preferredTime
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ProfileViewModel", "Failed to reschedule briefing", e)
+            }
         }
     }
 

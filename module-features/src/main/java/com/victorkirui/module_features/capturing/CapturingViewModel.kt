@@ -20,15 +20,12 @@ class CapturingViewModel(
     fun capture(shareContent: ShareContent) {
         Log.d("CapturingViewModel", "Capture started for content: $shareContent")
         
-        // Always show the initial processing state in the dialog
-        _uiState.value = CapturingUiState.Processing
+        // We no longer show the Processing state immediately to avoid triggering the dialog.
+        // The UI should show a toast (handled by the Caller/Activity).
 
-        // We launch in viewModelScope, but since this is usually triggered from an Intent 
-        // that finishes the activity quickly, we should consider a more robust background solution 
-        // (like WorkManager) in the future. For now, this works as long as the process stays alive.
         viewModelScope.launch {
             when (val result = capturingUseCase(shareContent)) {
-                CaptureResult.Success -> {
+                is CaptureResult.Success -> {
                     Log.d("CapturingViewModel", "Capture successful")
                     _uiState.value = CapturingUiState.Success
                     notificationHelper.showNotification("Capture Success", "Content processed and reminders set.")
@@ -38,10 +35,10 @@ class CapturingViewModel(
                     _uiState.value = CapturingUiState.Error(result.message)
                     notificationHelper.showNotification("Capture Failed", result.message)
                 }
-                CaptureResult.SavedLocallyOnly -> {
+                is CaptureResult.SavedLocallyOnly -> {
                     Log.i("CapturingViewModel", "Capture saved locally only (pending sync)")
-                    _uiState.value = CapturingUiState.Success // Still show success to user as it's saved
-                    notificationHelper.showNotification("Saved", "Content saved locally and will sync later.")
+                    _uiState.value = CapturingUiState.SavedLocally(result.message)
+                    notificationHelper.showNotification("Saved Offline", "Analysis will retry shortly.")
                 }
                 is CaptureResult.Overdue -> {
                     Log.i("CapturingViewModel", "Capture failed: item is overdue")
@@ -64,6 +61,7 @@ sealed class CapturingUiState {
     object Idle : CapturingUiState()
     object Processing : CapturingUiState()
     object Success : CapturingUiState()
+    data class SavedLocally(val message: String) : CapturingUiState()
     data class Error(val message: String) : CapturingUiState()
     data class Overdue(val message: String) : CapturingUiState()
 }

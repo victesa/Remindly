@@ -1,5 +1,7 @@
 package com.victorkirui.module_features.reminders
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,7 +10,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
@@ -30,14 +35,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.window.Dialog
 import com.victorkirui.core.ui.theme.*
 import com.victorkirui.core.ui.component.RemindlyNavigationRail
 import com.victorkirui.core.ui.component.RemindlyBottomNavigation
 import com.victorkirui.core.R
 import com.victorkirui.local.entity.ReminderWithItem
+import com.victorkirui.local.entity.Item
 import org.koin.androidx.compose.koinViewModel
+import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.*
 import java.time.format.DateTimeFormatter
@@ -106,11 +115,6 @@ fun RemindersScreenContent(
                                 color = Color.Black
                             ) 
                         },
-                        actions = {
-                            IconButton(onClick = { /* Search */ }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black)
-                            }
-                        },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
                     )
                 }
@@ -161,7 +165,7 @@ fun RemindersMobileContent(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -170,35 +174,182 @@ fun RemindersMobileContent(
                 selectedDate = selectedDate,
                 onDateSelected = onDateSelected,
                 onMonthChanged = onMonthChanged,
-                reminders = state.allReminders
+                allItems = state.allItems
             )
+        }
+
+        // Section for items on selected date
+        if (state.itemsForSelectedDate.isNotEmpty()) {
+            item {
+                Text(
+                    "SCHEDULE FOR ${selectedDate.format(DateTimeFormatter.ofPattern("MMMM d"))}".uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF2D6A4F),
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                )
+            }
+            items(state.itemsForSelectedDate) { item ->
+                val reminderWithItem = state.allReminders.find { it.reminder.itemId == item.id }
+                if (reminderWithItem != null) {
+                    UpcomingReminderCard(reminderWithItem, referenceDate)
+                } else {
+                    SimpleItemCard(item, referenceDate)
+                }
+            }
         }
 
         item {
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp),
-                thickness = 0.5.dp,
-                color = Color.LightGray.copy(alpha = 0.3f)
+                modifier = Modifier.padding(vertical = 12.dp),
+                thickness = 1.dp,
+                color = Color.LightGray.copy(alpha = 0.2f)
             )
         }
 
-        item {
-            Text(
-                "UPCOMING",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = Color.Gray,
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
-            )
-        }
-
-        items(state.upcomingReminders) { reminderWithItem ->
-            UpcomingReminderCard(reminderWithItem, referenceDate)
+        // Grouped Upcoming
+        val groupTitles = listOf("Today", "Tomorrow", "This Week", "Later")
+        groupTitles.forEach { title ->
+            val itemsInSection = state.upcomingGrouped[title]
+            if (!itemsInSection.isNullOrEmpty()) {
+                item {
+                    Text(
+                        title.uppercase(),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.Black.copy(alpha = 0.8f),
+                        letterSpacing = 1.2.sp,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                    )
+                }
+                items(itemsInSection) { item ->
+                    val reminderWithItem = state.allReminders.find { it.reminder.itemId == item.id }
+                    if (reminderWithItem != null) {
+                        UpcomingReminderCard(reminderWithItem, referenceDate)
+                    } else {
+                        SimpleItemCard(item, referenceDate)
+                    }
+                }
+            }
         }
         
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: LocalDate = LocalDate.now()) {
+    val dateStr = item.deadline ?: item.eventDate
+    val date = if (dateStr != null) {
+        try {
+            if (dateStr.contains("T")) {
+                if (dateStr.endsWith("Z")) {
+                    java.time.Instant.parse(dateStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                } else {
+                    java.time.LocalDateTime.parse(dateStr).toLocalDate()
+                }
+            } else {
+                LocalDate.parse(dateStr)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    } else null
+
+    val monthName = date?.month?.getDisplayName(TextStyle.SHORT, Locale.getDefault())?.uppercase() ?: ""
+    val dayOfMonth = date?.dayOfMonth?.toString() ?: ""
+    val daysLeft = if (date != null) ChronoUnit.DAYS.between(referenceDate, date) else -1
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAF9))
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Date Badge
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(40.dp)
+            ) {
+                Text(
+                    monthName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                    fontSize = 10.sp
+                )
+                Text(
+                    dayOfMonth,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    fontSize = 24.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Vertical Divider
+            VerticalDivider(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = 8.dp),
+                thickness = 1.dp,
+                color = Color.LightGray.copy(alpha = 0.3f)
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    maxLines = 1,
+                    color = Color.Black
+                )
+                
+                Spacer(modifier = Modifier.height(6.dp))
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = Color(0xFFF0F0F0),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            item.category ?: "Capture",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            if (daysLeft >= 0) {
+                Surface(
+                    color = if (daysLeft <= 3) Color(0xFFC0392B) else Color(0xFF2D6A4F),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = if (daysLeft == 0L) "Today" else "$daysLeft d",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -233,21 +384,46 @@ fun LargeScreenRemindersLayout(
                 selectedDate = selectedDate,
                 onDateSelected = onDateSelected,
                 onMonthChanged = onMonthChanged,
-                reminders = state.allReminders,
+                allItems = state.allItems,
                 isLargeScreen = true
             )
             
             Spacer(modifier = Modifier.height(32.dp))
             
-            // Legend
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF2D6A4F)))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Reminder", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                Spacer(modifier = Modifier.width(16.dp))
-                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFC0392B)))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Urgent", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            // Items for selected date section in large screen
+            if (state.itemsForSelectedDate.isNotEmpty()) {
+                Text(
+                    "SCHEDULE FOR ${selectedDate.format(DateTimeFormatter.ofPattern("MMMM d"))}".uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF2D6A4F),
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(state.itemsForSelectedDate) { item ->
+                        val reminderWithItem = state.allReminders.find { it.reminder.itemId == item.id }
+                        if (reminderWithItem != null) {
+                            UpcomingReminderCard(reminderWithItem)
+                        } else {
+                            SimpleItemCard(item)
+                        }
+                    }
+                }
+            } else {
+                // Legend
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF2D6A4F)))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Reminder", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFC0392B)))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Urgent", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
             }
         }
 
@@ -257,104 +433,208 @@ fun LargeScreenRemindersLayout(
             color = Color.LightGray.copy(alpha = 0.3f)
         )
 
-        // Detail Pane (Upcoming List)
+        // Detail Pane (Grouped Upcoming List)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .padding(horizontal = 32.dp, vertical = 32.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Upcoming",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black
-                )
-                Text(
-                    "${state.upcomingReminders.size} reminders",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
-            }
+            Text(
+                "Upcoming",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
             
             Spacer(modifier = Modifier.height(32.dp))
             
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
-                modifier = Modifier.fillMaxSize()
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                items(state.upcomingReminders) { reminderWithItem ->
-                    LargeReminderCard(reminderWithItem)
+                val groupTitles = listOf("Today", "Tomorrow", "This Week", "Later")
+                groupTitles.forEach { title ->
+                    val itemsInSection = state.upcomingGrouped[title]
+                    if (!itemsInSection.isNullOrEmpty()) {
+                        item {
+                            Text(
+                                title.uppercase(),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.Black.copy(alpha = 0.8f),
+                                letterSpacing = 1.2.sp
+                            )
+                        }
+                        item {
+                            // Use a grid for items within each section if preferred, 
+                            // but here we use a Row/Column pattern to fit the group
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                itemsInSection.chunked(2).forEach { rowItems ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        rowItems.forEach { item ->
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                val reminderWithItem = state.allReminders.find { it.reminder.itemId == item.id }
+                                                if (reminderWithItem != null) {
+                                                    LargeReminderCard(reminderWithItem)
+                                                } else {
+                                                    // We might need a LargeSimpleItemCard too, but for now reuse LargeReminderCard with dummy reminder if needed or create one
+                                                    SimpleItemCard(item) // Fallback to simple
+                                                }
+                                            }
+                                        }
+                                        if (rowItems.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarView(
     currentMonth: YearMonth,
     selectedDate: LocalDate,
     onDateSelected: (LocalDate) -> Unit,
     onMonthChanged: (YearMonth) -> Unit,
-    reminders: List<ReminderWithItem>,
+    allItems: List<com.victorkirui.local.entity.Item> = emptyList(),
     isLargeScreen: Boolean = false
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // Month Selector
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    )
+
+    if (showDatePicker) {
+        Dialog(onDismissRequest = { showDatePicker = false }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = Color.White,
+                tonalElevation = 6.dp,
+                modifier = Modifier
+                    .width(340.dp)
+                    .wrapContentHeight()
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 16.dp)
+                ) {
+                    DatePicker(
+                        state = datePickerState,
+                        showModeToggle = false,
+                        title = null,
+                        headline = null,
+                        colors = DatePickerDefaults.colors(
+                            containerColor = Color.White,
+                            selectedDayContainerColor = Evergreen,
+                            selectedDayContentColor = Color.White,
+                            todayContentColor = Evergreen,
+                            todayDateBorderColor = Evergreen,
+                            weekdayContentColor = Color.Gray,
+                            dayContentColor = DarkPine,
+                            navigationContentColor = DarkPine,
+                            selectedYearContainerColor = Evergreen,
+                            selectedYearContentColor = Color.White
+                        ),
+                        modifier = Modifier.scale(0.9f) // Scale down slightly to look better
+                    )
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("Cancel", color = MutedSage)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { millis ->
+                                val date = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                                onDateSelected(date)
+                            }
+                            showDatePicker = false
+                        }) {
+                            Text("Confirm", color = Evergreen, fontWeight = FontWeight.ExtraBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+    ) {
+        // Month Selector Header (Left-aligned like Google Calendar)
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { onMonthChanged(currentMonth.minusMonths(1)) }) {
-                Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { showDatePicker = true }
+            ) {
+                Text(
+                    text = "${currentMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${currentMonth.year}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (isLargeScreen) 22.sp else 19.sp,
+                    color = Color.Black
+                )
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = Color.Black
+                )
             }
-            Text(
-                text = "${currentMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${currentMonth.year}",
-                fontWeight = FontWeight.Bold,
-                fontSize = if (isLargeScreen) 18.sp else 16.sp,
-                modifier = Modifier.width(150.dp),
-                textAlign = TextAlign.Center
-            )
-            IconButton(onClick = { onMonthChanged(currentMonth.plusMonths(1)) }) {
-                Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
+            
+            Row {
+                IconButton(onClick = { onMonthChanged(currentMonth.minusMonths(1)) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.ChevronLeft, contentDescription = "Prev", tint = Color.Gray)
+                }
+                IconButton(onClick = { onMonthChanged(currentMonth.plusMonths(1)) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Next", tint = Color.Gray)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(if (isLargeScreen) 16.dp else 8.dp))
-
-        // Day Names
-        Row(modifier = Modifier.fillMaxWidth()) {
-            val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        // Day Labels (Single letter, small)
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            val days = listOf("S", "M", "T", "W", "T", "F", "S")
             days.forEach { day ->
                 Text(
                     text = day,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(if (isLargeScreen) 8.dp else 4.dp))
-
-        // Days Grid
+        // Days Grid (Compact)
         val firstDayOfMonth = currentMonth.atDay(1)
-        val lastDayOfMonth = currentMonth.atEndOfMonth()
-        val firstDayOfWeek = firstDayOfMonth.dayOfWeek.value // 1 (Mon) to 7 (Sun)
+        val firstDayOfWeek = firstDayOfMonth.dayOfWeek.value % 7 // 0 (Sun) to 6 (Sat)
         
         val daysInMonth = (1..currentMonth.lengthOfMonth()).toList()
-        val emptyDaysBeforeCount = firstDayOfWeek - 1
+        val emptyDaysBeforeCount = firstDayOfWeek
+        
         val prevMonth = currentMonth.minusMonths(1)
         val lastDayOfPrevMonth = prevMonth.atEndOfMonth().dayOfMonth
         val emptyDaysBefore = (0 until emptyDaysBeforeCount).map { lastDayOfPrevMonth - emptyDaysBeforeCount + it + 1 }
@@ -363,64 +643,125 @@ fun CalendarView(
         val daysAfter = (1..daysAfterCount).toList()
 
         val allDays = emptyDaysBefore.map { it to -1 } + daysInMonth.map { it to 0 } + daysAfter.map { it to 1 }
-        
         val rows = allDays.chunked(7)
         
+        fun parseSafe(dStr: String?): LocalDate? {
+            if (dStr == null) return null
+            return try {
+                if (dStr.contains("T")) {
+                    if (dStr.endsWith("Z")) java.time.Instant.parse(dStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    else java.time.LocalDateTime.parse(dStr).toLocalDate()
+                } else LocalDate.parse(dStr)
+            } catch (e: Exception) { null }
+        }
+
+        val itemsByDate = allItems.groupBy { parseSafe(it.deadline ?: it.eventDate) }
+
         rows.forEach { week ->
             Row(modifier = Modifier.fillMaxWidth()) {
                 week.forEach { (day, monthOffset) ->
+                    val date = when (monthOffset) {
+                        -1 -> prevMonth.atDay(day)
+                        1 -> currentMonth.plusMonths(1).atDay(day)
+                        else -> currentMonth.atDay(day)
+                    }
+                    
+                    val isSelected = date == selectedDate
+                    val isToday = date == LocalDate.now()
+                    val itemsOnDate = itemsByDate[date] ?: emptyList()
+                    val hasItems = itemsOnDate.isNotEmpty()
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .aspectRatio(if (isLargeScreen) 1.4f else 1.8f)
                             .padding(vertical = 1.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        val date = when (monthOffset) {
-                            -1 -> prevMonth.atDay(day)
-                            1 -> currentMonth.plusMonths(1).atDay(day)
-                            else -> currentMonth.atDay(day)
-                        }
-                        
-                        val isSelected = date == selectedDate
-                        val hasReminders = reminders.any { 
-                            LocalDate.parse(it.reminder.reminderDateTime.substring(0, 10)) == date 
-                        }
-                        val isUrgent = reminders.any {
-                            val rDate = LocalDate.parse(it.reminder.reminderDateTime.substring(0, 10))
-                            rDate == date && ChronoUnit.DAYS.between(LocalDate.now(), rDate) <= 3
-                        }
-
-                        Box(
-                            contentAlignment = Alignment.Center,
+                        Surface(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) Color(0xFF2D6A4F) else Color.Transparent)
-                                .clickable { onDateSelected(date) }
+                                .size(34.dp)
+                                .clickable { onDateSelected(date) },
+                            shape = if (isSelected) RoundedCornerShape(10.dp) else CircleShape,
+                            color = when {
+                                isSelected -> Color(0xFF2D6A4F)
+                                isToday && !isSelected -> Color(0xFF2D6A4F).copy(alpha = 0.08f)
+                                else -> Color.Transparent
+                            },
+                            border = if (isToday && !isSelected) BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.5f)) else null
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = day.toString(),
-                                    color = if (isSelected) Color.White else if (monthOffset != 0) Color.LightGray else Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = if(isLargeScreen) 20.sp else 14.sp
-                                )
-                                if (hasReminders && !isSelected) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (hasItems) {
                                     Box(
                                         modifier = Modifier
-                                            .size(3.dp)
+                                            .align(Alignment.TopCenter)
+                                            .padding(top = 2.dp)
+                                            .size(if (isLargeScreen) 4.dp else 3.dp)
                                             .clip(CircleShape)
-                                            .background(if (isUrgent) Color(0xFFC0392B) else Color(0xFF2D6A4F))
+                                            .background(if (isSelected) Color.White else Color(0xFF2D6A4F))
                                     )
                                 }
+
+                                Text(
+                                    text = day.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = when {
+                                        isSelected -> Color.White
+                                        isToday -> Color(0xFF2D6A4F)
+                                        monthOffset != 0 -> Color.LightGray
+                                        else -> Color.Black
+                                    },
+                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
                             }
                         }
                     }
                 }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Month Strip
+        MonthStrip(
+            selectedMonth = currentMonth,
+            onMonthSelected = onMonthChanged
+        )
+    }
+}
+
+@Composable
+fun MonthStrip(
+    selectedMonth: YearMonth,
+    onMonthSelected: (YearMonth) -> Unit
+) {
+    val months = (1..12).map { YearMonth.of(selectedMonth.year, it) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedMonth.monthValue - 1)
+
+    LazyRow(
+        state = listState,
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(months) { month ->
+            val isSelected = month == selectedMonth
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { onMonthSelected(month) },
+                color = if (isSelected) Evergreen.copy(alpha = 0.1f) else Color.Transparent,
+                shape = RoundedCornerShape(20.dp),
+                border = if (isSelected) BorderStroke(1.dp, Evergreen) else null
+            ) {
+                Text(
+                    text = month.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isSelected) Evergreen else MutedSage,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                )
             }
         }
     }
@@ -706,9 +1047,11 @@ fun RemindersMobilePreview() {
         RemindersScreenContent(
             uiState = RemindersUiState.Success(
                 allReminders = allReminders,
+                allItems = allReminders.map { it.item },
                 selectedDate = LocalDate.of(2025, 6, 23),
                 currentMonth = YearMonth.of(2025, 6),
-                upcomingReminders = allReminders
+                itemsForSelectedDate = emptyList(),
+                upcomingGrouped = emptyMap()
             ),
             selectedDate = LocalDate.of(2025, 6, 23),
             currentMonth = YearMonth.of(2025, 6),
@@ -775,9 +1118,11 @@ fun RemindersLargeScreenPreview() {
             RemindersScreenContent(
                 uiState = RemindersUiState.Success(
                     allReminders = allReminders,
+                    allItems = allReminders.map { it.item },
                     selectedDate = LocalDate.of(2025, 6, 23),
                     currentMonth = YearMonth.of(2025, 6),
-                    upcomingReminders = allReminders
+                    itemsForSelectedDate = emptyList(),
+                    upcomingGrouped = emptyMap()
                 ),
                 selectedDate = LocalDate.of(2025, 6, 23),
                 currentMonth = YearMonth.of(2025, 6),

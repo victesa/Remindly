@@ -13,6 +13,13 @@ import com.victorkirui.module_features.home.HomeViewModel
 import com.victorkirui.module_features.profile.ProfileViewModel
 import com.victorkirui.module_features.auth.SignUpViewModel
 import com.victorkirui.module_features.auth.SignInViewModel
+import com.victorkirui.module_features.capturing.ai.AiExtractor
+import com.victorkirui.module_features.capturing.ai.RemindlyBackendExtractor
+import com.victorkirui.module_features.onboarding.OnboardingViewModel
+import com.victorkirui.module_features.BuildConfig
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import org.koin.android.ext.koin.androidContext
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
@@ -24,11 +31,18 @@ import java.util.TimeZone
 val featureModule = module {
     single { ReminderScheduler(androidContext(), get(), get()) }
     single { PdfTextExtractor(androidContext()) }
+    
+    single<AiExtractor> { 
+        RemindlyBackendExtractor(
+            context = androidContext(),
+            backendBaseUrl = "https://8wzmrlnc-3000.uks1.devtunnels.ms"
+        ) 
+    }
     factory { 
         CapturingUseCase(
             context = androidContext(),
             localRepository = get(),
-            apiService = get(),
+            aiExtractor = get(),
             reminderScheduler = get(),
             pdfTextExtractor = get(),
             timestampProvider = { 
@@ -57,4 +71,5 @@ val featureModule = module {
     }
     viewModel { SignUpViewModel(get()) }
     viewModel { SignInViewModel(get()) }
+    viewModel { OnboardingViewModel(get()) }
 }

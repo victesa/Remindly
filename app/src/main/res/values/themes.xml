@@ -2,4 +2,13 @@
 <resources>
 
     <style name="Theme.Remindly" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.Remindly.Transparent" parent="Theme.Remindly">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

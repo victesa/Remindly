@@ -10,5 +10,7 @@ data class CaptureRequest(
 
 data class CaptureMetadata(
     val source: String,
-    val timezone: String
+    val timezone: String,
+    val locale: String? = null,
+    val extra: Map<String, String>? = null
 )

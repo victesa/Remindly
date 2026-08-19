@@ -26,6 +26,9 @@ interface LocalRepository {
     suspend fun updateReminder(reminder: Reminder)
 
     suspend fun deleteItem(id: String)
+    suspend fun deleteItemsByCategory(category: String)
+    suspend fun deleteUncategorizedItems()
+    suspend fun deletePendingSyncItems()
 
     suspend fun <R> withTransaction(block: suspend () -> R): R
 }

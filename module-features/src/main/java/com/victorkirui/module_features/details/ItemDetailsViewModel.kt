@@ -50,11 +50,11 @@ class ItemDetailsViewModel(
         val id = _itemId.value ?: return
         viewModelScope.launch {
             val item = localRepository.getItem(id) ?: return@launch
-            
+
             val today = LocalDate.now()
             val deadline = item.deadline
             val isOverdue = deadline != null && LocalDate.parse(deadline).isBefore(today)
-            
+
             if (isOverdue) {
                 // If deadline has passed and it's done, delete it automatically
                 localRepository.deleteItem(id)

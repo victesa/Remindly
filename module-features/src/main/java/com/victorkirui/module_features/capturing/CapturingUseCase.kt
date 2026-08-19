@@ -1,114 +1,94 @@
 package com.victorkirui.module_features.capturing
 
-import android.util.Log
+import android.content.Context
 import android.net.Uri
-import com.victorkirui.core.model.CaptureMetadata
-import com.victorkirui.core.model.CaptureRequest
+import android.util.Log
+import android.webkit.MimeTypeMap
 import com.victorkirui.core.model.ShareContent
 import com.victorkirui.local.entity.Item
 import com.victorkirui.local.entity.PendingSync
 import com.victorkirui.local.repository.LocalRepository
+import com.victorkirui.module_features.capturing.ai.AiExtractor
+import com.victorkirui.module_features.capturing.ai.AiInput
+import com.victorkirui.module_features.capturing.ai.AiResult
 import com.victorkirui.module_features.reminder.ReminderScheduler
-import com.victorkirui.remote.CaptureApiService
-import android.content.Context
-import java.util.UUID
-import java.io.File
-import java.io.FileOutputStream
-import android.webkit.MimeTypeMap
-import androidx.core.net.toFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.util.*
 
 sealed class CaptureResult {
-    object Success : CaptureResult()
+    data class Success(val itemId: String) : CaptureResult()
     data class Error(val message: String, val throwable: Throwable? = null) : CaptureResult()
-    object SavedLocallyOnly : CaptureResult()
+    data class SavedLocallyOnly(val itemId: String, val message: String) : CaptureResult()
     data class Overdue(val item: Item) : CaptureResult()
 }
 
 class CapturingUseCase(
     private val context: Context,
     private val localRepository: LocalRepository,
-    private val apiService: CaptureApiService,
+    private val aiExtractor: AiExtractor,
     private val reminderScheduler: ReminderScheduler,
     private val pdfTextExtractor: PdfTextExtractor,
     private val timestampProvider: () -> String
 ) {
     suspend operator fun invoke(shareContent: ShareContent): CaptureResult {
         return try {
-            val rawSource = when (shareContent) {
-                is ShareContent.Text -> shareContent.source
-                is ShareContent.Image -> shareContent.source
-                is ShareContent.Pdf -> shareContent.source
-                ShareContent.Unknown -> null
-            } ?: "intent"
-            
-            val sourceApp = if (rawSource.contains(".")) {
-                getAppNameFromPackage(rawSource)
-            } else {
-                rawSource
-            }
-            Log.d("CapturingUseCase", "Captured source: raw='$rawSource', resolved='$sourceApp'")
-
+            val sourceApp = getResolvedSource(shareContent)
             val itemId = "local-" + UUID.randomUUID().toString()
             val capturedAt = timestampProvider()
-            val metadata = CaptureMetadata(
-                source = sourceApp,
-                timezone = java.util.TimeZone.getDefault().id
-            )
+            
+            val sourceUrl = when (shareContent) {
+                is ShareContent.Text -> extractUrl(shareContent.content)
+                is ShareContent.Pdf -> shareContent.sourceUrl
+                is ShareContent.Image -> shareContent.sourceUrl
+                else -> null
+            }
 
             var mediaUri: Uri? = null
             var extractedTextFromOcr: String? = null
-            
-            val request = when (shareContent) {
-                is ShareContent.Text -> CaptureRequest(
-                    itemId = itemId,
-                    contentType = "TEXT",
-                    extractedText = shareContent.content,
-                    capturedAt = capturedAt,
-                    metadata = metadata
-                )
+            val contentType = getContentType(shareContent)
+
+            // 1. Prepare Media and local OCR
+            when (shareContent) {
+                is ShareContent.Text -> {
+                    val text = shareContent.content.trim()
+                    if (text.isEmpty() && sourceUrl == null) {
+                        return CaptureResult.Error("Captured text is empty.")
+                    }
+                    extractedTextFromOcr = text
+                }
                 is ShareContent.Image -> {
-                    mediaUri = copyToInternalStorage(Uri.parse(shareContent.uriString), itemId)
-                    // Optional: Run OCR on images too if backend requires it for consistency
-                    // extractedTextFromOcr = mediaUri?.let { pdfTextExtractor.extractTextFromImage(it) }
-                    CaptureRequest(
-                        itemId = itemId,
-                        contentType = "IMAGE",
-                        extractedText = null,
-                        capturedAt = capturedAt,
-                        metadata = metadata
-                    )
+                    val originalUri = Uri.parse(shareContent.uriString)
+                    mediaUri = copyToInternalStorage(originalUri, itemId, "IMAGE")
+                    extractedTextFromOcr = pdfTextExtractor.extractTextFromImage(mediaUri ?: originalUri)
                 }
                 is ShareContent.Pdf -> {
                     val originalUri = Uri.parse(shareContent.uriString)
-                    mediaUri = copyToInternalStorage(originalUri, itemId)
-                    
-                    // Run OCR on PDF
-                    extractedTextFromOcr = mediaUri?.let { pdfTextExtractor.extractText(it) }
-                    
-                    CaptureRequest(
-                        itemId = itemId,
-                        contentType = "DOCUMENT",
-                        extractedText = extractedTextFromOcr,
-                        capturedAt = capturedAt,
-                        metadata = metadata
-                    )
+                    mediaUri = copyToInternalStorage(originalUri, itemId, "DOCUMENT")
+                    extractedTextFromOcr = pdfTextExtractor.extractText(mediaUri ?: originalUri)
                 }
                 ShareContent.Unknown -> return CaptureResult.Error("Unknown content type")
             }
 
-            // 1. Save initial state to local DB (PENDING) in a transaction
+            if (mediaUri == null && extractedTextFromOcr == null && sourceUrl == null) {
+                return CaptureResult.Error("Remindly cannot read this content. It may be restricted or empty.")
+            }
+
+            // 2. Save initial state to local DB (PENDING)
             val initialItem = Item(
                 id = itemId,
-                title = "Processing...",
+                title = "Analysing...",
                 summary = null,
-                category = null,
+                category = contentType,
                 deadline = null,
                 eventDate = null,
+                source = sourceApp,
+                sourceUrl = sourceUrl,
                 originalMediaUri = mediaUri?.toString(),
-                extractedText = request.extractedText,
-                contentType = request.contentType,
+                extractedText = extractedTextFromOcr,
+                contentType = contentType,
                 createdAt = capturedAt,
                 status = "PENDING"
             )
@@ -118,118 +98,126 @@ class CapturingUseCase(
                 localRepository.addPendingSync(PendingSync(itemId = itemId))
             }
 
-            // 2. Send to remote
-            val response = try {
-                Log.d("CapturingUseCase", "Sending request to remote: $request, mediaUri: $mediaUri")
-                apiService.capture(request, mediaUri)
-            } catch (e: Exception) {
-                Log.e("CapturingUseCase", "Remote capture failed: ${e.message}", e)
-                // If remote fails, we've already saved locally
-                SyncWorker.schedule(context)
-                return CaptureResult.SavedLocallyOnly
-            }
+            // 3. AI Extraction
+            val aiInput = AiInput(
+                text = extractedTextFromOcr ?: sourceUrl,
+                mediaUri = if (contentType == "DOCUMENT") null else mediaUri, // Rule: Do not upload raw PDF as image
+                contentType = contentType,
+                idempotencyKey = itemId // Use the itemId (generated once per action) as Idempotency-Key
+            )
 
-            Log.d("CapturingUseCase", "Remote capture successful: $response")
+            val result = aiExtractor.extract(aiInput)
+            
+            if (result is AiResult.Success) {
+                // Check for past dates
+                val today = java.time.LocalDate.now()
+                val deadlineDate = result.deadline?.let { try { java.time.LocalDate.parse(it) } catch (e: Exception) { null } }
+                val eventDate = result.eventDate?.let { try { java.time.LocalDate.parse(it) } catch (e: Exception) { null } }
 
-            // 3. Check if overdue BEFORE saving to DB
-            val today = java.time.LocalDate.now()
-            val deadlineDate = response.item.deadline?.let {
-                try { java.time.LocalDate.parse(it) } catch (e: Exception) { null }
-            }
-            val eventDate = response.item.eventDate?.let {
-                try { java.time.LocalDate.parse(it) } catch (e: Exception) { null }
-            }
+                if ((deadlineDate != null && deadlineDate.isBefore(today)) || (eventDate != null && eventDate.isBefore(today))) {
+                    localRepository.withTransaction {
+                        localRepository.deleteItem(itemId)
+                        localRepository.removePendingSync(itemId)
+                    }
+                    return CaptureResult.Overdue(Item(
+                        id = itemId, title = result.title, deadline = result.deadline, eventDate = result.eventDate, status = "REJECTED", createdAt = capturedAt, summary = result.summary, category = result.category
+                    ))
+                }
 
-            if ((deadlineDate != null && deadlineDate.isBefore(today)) ||
-                (eventDate != null && eventDate.isBefore(today))) {
-                
-                Log.w("CapturingUseCase", "Rejecting capture with past date: deadline=$deadlineDate, event=$eventDate")
-                
-                // Cleanup: Remove the pending item we created at the start
+                val updatedItem = initialItem.copy(
+                    title = result.title,
+                    summary = result.summary,
+                    category = result.category,
+                    deadline = result.deadline,
+                    eventDate = result.eventDate,
+                    organization = result.organization,
+                    status = "READY",
+                    metadata = mapOf("strategy" to result.strategy)
+                )
+
                 localRepository.withTransaction {
-                    localRepository.deleteItem(itemId)
+                    localRepository.saveItem(updatedItem)
+                    reminderScheduler.scheduleRemindersForItem(updatedItem)
                     localRepository.removePendingSync(itemId)
                 }
-                
-                return CaptureResult.Overdue(Item(
-                    id = itemId,
-                    title = response.item.title,
-                    summary = response.item.summary,
-                    category = response.item.category,
-                    deadline = response.item.deadline,
-                    eventDate = response.item.eventDate,
-                    status = "REJECTED",
-                    createdAt = capturedAt
-                ))
+                CaptureResult.Success(itemId)
+            } else {
+                // AI Failed but we have it locally, schedule SyncWorker to retry AI later
+                SyncWorker.schedule(context)
+                CaptureResult.SavedLocallyOnly(itemId, "AI Analysis is busy. Saved offline and will retry shortly.")
             }
-
-            // 4. Update local DB with response & 5. Schedule Reminders in a transaction
-            val updatedItem = Item(
-                id = itemId,
-                title = response.item.title,
-                summary = response.item.summary,
-                category = response.item.category,
-                deadline = response.item.deadline,
-                eventDate = response.item.eventDate,
-                organization = response.item.organization,
-                source = response.item.source ?: sourceApp,
-                sourceUrl = response.item.sourceUrl,
-                originalMediaUri = response.item.originalMediaUri ?: mediaUri?.toString(),
-                extractedText = initialItem.extractedText,
-                contentType = initialItem.contentType,
-                metadata = response.item.metadata.filterValues { it is String }.mapValues { it.value as String },
-                createdAt = response.item.createdAt,
-                status = response.item.state
-            )
-            
-            localRepository.withTransaction {
-                localRepository.saveItem(updatedItem)
-                // 5. Schedule Reminders
-                reminderScheduler.scheduleRemindersForItem(updatedItem)
-                // 6. Remote was successful, remove from pending sync
-                localRepository.removePendingSync(itemId)
-            }
-
-            CaptureResult.Success
         } catch (e: Exception) {
-            CaptureResult.Error(e.message ?: "An unexpected error occurred", e)
+            Log.e("CapturingUseCase", "Capture flow failed", e)
+            CaptureResult.Error(e.message ?: "An unexpected error occurred")
         }
+    }
+
+    private fun getResolvedSource(shareContent: ShareContent): String {
+        val raw = when (shareContent) {
+            is ShareContent.Text -> shareContent.source
+            is ShareContent.Image -> shareContent.source
+            is ShareContent.Pdf -> shareContent.source
+            else -> null
+        } ?: "intent"
+        
+        return if (raw.contains(".")) getAppNameFromPackage(raw) else raw
+    }
+
+    private fun getContentType(shareContent: ShareContent): String = when (shareContent) {
+        is ShareContent.Text -> "TEXT"
+        is ShareContent.Image -> "IMAGE"
+        is ShareContent.Pdf -> "DOCUMENT"
+        else -> "OTHER"
     }
 
     private fun getAppNameFromPackage(packageName: String): String {
         return try {
             val pm = context.packageManager
-            val ai = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                pm.getApplicationInfo(packageName, android.content.pm.PackageManager.ApplicationInfoFlags.of(0))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.getApplicationInfo(packageName, 0)
-            }
+            val ai = pm.getApplicationInfo(packageName, 0)
             pm.getApplicationLabel(ai).toString()
         } catch (e: Exception) {
             packageName
         }
     }
 
-    private fun copyToInternalStorage(uri: Uri, itemId: String): Uri? {
-        Log.d("CapturingUseCase", "Copying URI to internal storage: $uri")
+    private fun copyToInternalStorage(uri: Uri, itemId: String, contentType: String): Uri? {
+        Log.d("CapturingUseCase", "Copying $uri to internal storage. itemId: $itemId")
         return try {
-            val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(context.contentResolver.getType(uri))
-            val fileName = "captured_${itemId}${if (extension != null) ".$extension" else ""}"
-            val destFile = File(context.filesDir, "captures").apply { if (!exists()) mkdirs() }
-            val file = File(destFile, fileName)
-            
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(file).use { output ->
-                    input.copyTo(output)
+            val detectedMime = if (uri.scheme == "content") context.contentResolver.getType(uri) else null
+            var extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(detectedMime)
+            if (extension == null) {
+                extension = when (contentType) {
+                    "DOCUMENT" -> "pdf"
+                    "IMAGE" -> "jpg"
+                    else -> null
                 }
             }
+            val destDir = File(context.filesDir, "captures").apply { if (!exists()) mkdirs() }
+            val file = File(destDir, "captured_${itemId}${if (extension != null) ".$extension" else ""}")
+            
+            val inputStream = if (uri.scheme == "file") {
+                File(uri.path!!).inputStream()
+            } else {
+                context.contentResolver.openInputStream(uri)
+            }
+
+            inputStream?.use { input -> 
+                FileOutputStream(file).use { output -> 
+                    input.copyTo(output) 
+                } 
+            } ?: throw Exception("Could not open input stream")
+
             val resultUri = Uri.fromFile(file)
             Log.d("CapturingUseCase", "Successfully copied to: $resultUri")
             resultUri
         } catch (e: Exception) {
-            Log.e("CapturingUseCase", "Failed to copy media to internal storage: ${e.message}", e)
+            Log.e("CapturingUseCase", "Internal storage copy failed", e)
             null
         }
+    }
+
+    private fun extractUrl(text: String): String? {
+        val urlRegex = "(https?://[\\w\\d\\-._~:/?#\\[\\]@!$&'()*+,;=]+)".toRegex()
+        return urlRegex.find(text)?.value
     }
 }

@@ -3,8 +3,8 @@ package com.victorkirui.remindly
 import android.app.Application
 import com.victorkirui.core.di.coreModule
 import com.victorkirui.local.di.localModule
-import com.victorkirui.module_features.di.featureModule
 import com.victorkirui.remote.di.remoteModule
+import com.victorkirui.module_features.di.featureModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin

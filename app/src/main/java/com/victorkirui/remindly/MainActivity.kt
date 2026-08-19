@@ -11,19 +11,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.victorkirui.core.ShareIntentHandler
-import com.victorkirui.core.model.ShareContent
+import com.victorkirui.core.notification.NotificationHelper
 import com.victorkirui.core.repository.ReminderSettingsRepository
 import com.victorkirui.module_features.capturing.CapturingDialog
 import com.victorkirui.module_features.capturing.CapturingViewModel
@@ -31,7 +28,6 @@ import com.victorkirui.module_features.reminder.BriefingWorker
 import com.victorkirui.remindly.nav.RemindlyNavigation
 import com.victorkirui.core.ui.theme.RemindlyTheme
 import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -42,12 +38,14 @@ class MainActivity : ComponentActivity() {
     private val shareIntentParser = ShareIntentHandler()
     private val capturingViewModel: CapturingViewModel by viewModel()
     private val settingsRepository: ReminderSettingsRepository by inject()
+    
+    private var pendingItemId by mutableStateOf<String?>(null)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            // Permission granted, notifications will now work
+            // Permission granted
         }
     }
 
@@ -57,16 +55,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         
         checkNotificationPermission()
-        handleShareIntent(intent)
+        handleIntent(intent)
 
         MainScope().launch {
-            val preferredTimeStr = settingsRepository.preferredReminderTime.first()
-            val preferredTime = try {
-                LocalTime.parse(preferredTimeStr)
-            } catch (e: Exception) {
-                LocalTime.of(8, 0)
+            settingsRepository.preferredReminderTime.collect { preferredTimeStr ->
+                val preferredTime = try {
+                    LocalTime.parse(preferredTimeStr)
+                } catch (e: Exception) {
+                    LocalTime.of(8, 0)
+                }
+                BriefingWorker.schedule(this@MainActivity, preferredTime)
             }
-            BriefingWorker.schedule(this@MainActivity, preferredTime)
         }
 
         setContent {
@@ -79,22 +78,31 @@ class MainActivity : ComponentActivity() {
                 val windowSizeClass = calculateWindowSizeClass(this)
                 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    val source = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                        referrer?.host ?: "Unknown"
-                    } else {
-                        "Unknown"
-                    }
+                    val source = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                            referrer?.host ?: "Unknown"
+                        } else {
+                            "Unknown"
+                        }
+                    } catch (e: Exception) { "Unknown" }
+
                     RemindlyNavigation(
                         shareContent = shareIntentParser.handleIntent(intent, source),
+                        initialItemId = pendingItemId,
                         windowWidthSizeClass = windowSizeClass.widthSizeClass
                     )
+                    
+                    // Reset pendingItemId after passing it to navigation
+                    androidx.compose.runtime.LaunchedEffect(pendingItemId) {
+                        if (pendingItemId != null) {
+                            pendingItemId = null
+                        }
+                    }
                     
                     CapturingDialog(
                         uiState = uiState,
                         onDismiss = { 
                             capturingViewModel.resetState()
-                            // Move task to back to return to previous app
-                            moveTaskToBack(true)
                         }
                     )
                 }
@@ -105,18 +113,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleShareIntent(intent)
+        handleIntent(intent)
     }
 
-    private fun handleShareIntent(intent: Intent?) {
-        val source = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            referrer?.host ?: "Unknown"
-        } else {
-            "Unknown"
-        }
-        val sharedContent = shareIntentParser.handleIntent(intent, source)
-        if (sharedContent !is ShareContent.Unknown) {
-            capturingViewModel.capture(sharedContent)
+    private fun handleIntent(intent: Intent?) {
+        intent?.getStringExtra(NotificationHelper.EXTRA_ITEM_ID)?.let { itemId ->
+            pendingItemId = itemId
         }
     }
 
@@ -130,15 +132,5 @@ class MainActivity : ComponentActivity() {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-    }
-
-    private fun hideSystemBars() {
-        val windowInsetsController =
-            WindowCompat.getInsetsController(window, window.decorView)
-        // Configure the behavior of the system bars.
-        windowInsetsController.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        // Hide both the status bar and the navigation bar.
-        windowInsetsController.hide(WindowInsetsCompat.Type.systemBars())
     }
 }

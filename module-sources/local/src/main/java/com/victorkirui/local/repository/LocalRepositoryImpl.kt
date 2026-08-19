@@ -76,7 +76,23 @@ class LocalRepositoryImpl(
     }
 
     override suspend fun deleteItem(id: String) {
-        itemDao.deleteById(id)
+        database.withTransaction {
+            reminderDao.deleteRemindersForItem(id)
+            pendingSyncDao.deleteByItemId(id)
+            itemDao.deleteById(id)
+        }
+    }
+
+    override suspend fun deleteItemsByCategory(category: String) {
+        itemDao.deleteByCategory(category)
+    }
+
+    override suspend fun deleteUncategorizedItems() {
+        itemDao.deleteUncategorized()
+    }
+
+    override suspend fun deletePendingSyncItems() {
+        itemDao.deletePendingSync()
     }
 
     override suspend fun <R> withTransaction(block: suspend () -> R): R {

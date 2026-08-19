@@ -14,11 +14,27 @@ class CategoryDetailViewModel(
     private val _categoryName = MutableStateFlow("")
     
     val uiState: StateFlow<CategoryDetailUiState> = _categoryName.flatMapLatest { name ->
-        if (name.isEmpty()) {
-            flowOf(CategoryDetailUiState.Idle)
-        } else {
-            localRepository.getItemsByCategory(name).map { items ->
-                CategoryDetailUiState.Success(name, items)
+        when {
+            name.isEmpty() -> flowOf(CategoryDetailUiState.Idle)
+            name == "PENDING_SYNC" -> {
+                localRepository.getAllItems().map { all ->
+                    val pending = all.filter { it.status == "PENDING" }
+                    CategoryDetailUiState.Success(name, pending)
+                }
+            }
+            name == "UNCATEGORIZED" -> {
+                localRepository.getAllItems().map { all ->
+                    // Show items that are processed but have no category
+                    val items = all.filter { it.category.isNullOrBlank() && it.status != "PENDING" && it.status != "DONE" }
+                    CategoryDetailUiState.Success(name, items)
+                }
+            }
+            else -> {
+                localRepository.getItemsByCategory(name).map { items ->
+                    // Filter out DONE items to match Inbox view behavior
+                    val activeItems = items.filter { it.status != "DONE" }
+                    CategoryDetailUiState.Success(name, activeItems)
+                }
             }
         }
     }.stateIn(

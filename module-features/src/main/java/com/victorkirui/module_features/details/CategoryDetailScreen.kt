@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
 import com.victorkirui.core.ui.theme.*
+import com.victorkirui.core.util.DateUtils
 import com.victorkirui.module_features.capturing.SourceIcon
 import com.victorkirui.module_features.capturing.SourceIconProvider
 import com.victorkirui.core.R
@@ -126,6 +127,18 @@ fun CategoryDetailScreen(
                         }
                     },
                     actions = {
+                        val allItems = (uiState as? CategoryDetailUiState.Success)?.items ?: emptyList()
+                        val isAllSelected = selectedItemIds.size == allItems.size
+                        
+                        IconButton(onClick = {
+                            selectedItemIds = if (isAllSelected) emptySet() else allItems.map { it.id }.toSet()
+                        }) {
+                            Icon(
+                                if (isAllSelected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                contentDescription = "Select all",
+                                tint = Color.Black
+                            )
+                        }
                         IconButton(
                             onClick = { showBulkDoneConfirm = true },
                             enabled = canMarkAsDone
@@ -155,11 +168,6 @@ fun CategoryDetailScreen(
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.Black)
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* Search */ }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black, modifier = Modifier.size(24.dp))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
@@ -233,7 +241,7 @@ fun CategoryDetailContent(
         }
 
         if (deadlineSoon.isNotEmpty()) {
-            item { CategorySectionHeader("DEADLINE SOON") }
+            item { CategorySectionHeader("URGENT DEADLINES") }
             items(deadlineSoon) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -254,7 +262,7 @@ fun CategoryDetailContent(
         }
 
         if (upcoming.isNotEmpty()) {
-            item { CategorySectionHeader("UPCOMING") }
+            item { CategorySectionHeader("SCHEDULED") }
             items(upcoming) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -274,7 +282,7 @@ fun CategoryDetailContent(
         }
 
         if (noDeadline.isNotEmpty()) {
-            item { CategorySectionHeader("NO DEADLINE") }
+            item { CategorySectionHeader("NO SET DEADLINE") }
             items(noDeadline) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -319,34 +327,39 @@ fun CategoryDetailContent(
 }
 
 private fun getSubtitleText(item: Item): String {
-    if (item.status == "DONE") return "Marked as Done"
-    val syncText = if (item.status == "PENDING") " [Sync Pending]" else ""
-    val deadlineText = getDeadlineText(item.deadline)
-    return if (deadlineText.isNotEmpty()) "$deadlineText$syncText" else "Saved · Just now$syncText"
-}
-
-private fun getDeadlineText(deadline: String?): String {
-    if (deadline == null) return ""
-    val date = LocalDate.parse(deadline)
-    val days = ChronoUnit.DAYS.between(LocalDate.now(), date)
-    return when {
-        days == 0L -> "Deadline Today"
-        days == 1L -> "Deadline in 1 day"
-        days <= 7L -> "Deadline in $days days"
-        else -> "Deadline · ${date.dayOfMonth} ${date.month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }}"
+    if (item.status == "DONE") return "Marked as completed"
+    val syncText = if (item.status == "PENDING") " [Syncing...]" else ""
+    val deadlineText = DateUtils.getDeadlineText(item.deadline)
+    return if (deadlineText.isNotEmpty()) {
+        deadlineText + syncText
+    } else {
+        "Captured ${DateUtils.getTimeAgo(item.createdAt)}$syncText"
     }
 }
 
 @Composable
 fun CategorySectionHeader(title: String, isCompleted: Boolean = false) {
-    Text(
-        title,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        color = if (isCompleted) Color(0xFF2D6A4F) else Color(0xFFC0392B).copy(alpha = 0.7f),
-        letterSpacing = 1.2.sp,
-        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
-    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (isCompleted) 8.dp else 6.dp)
+                .clip(CircleShape)
+                .background(if (isCompleted) Evergreen else MountainBerry)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = if (isCompleted) Evergreen else MountainBerry,
+            letterSpacing = 1.5.sp
+        )
+    }
 }
 
 @Composable

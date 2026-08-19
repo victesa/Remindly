@@ -29,7 +29,14 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Remindly.Transparent"
+            android:excludeFromRecents="true"
+            android:noHistory="true">
             <!-- Share Text -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

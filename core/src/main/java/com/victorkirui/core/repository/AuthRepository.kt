@@ -14,7 +14,7 @@ interface AuthRepository {
     suspend fun signIn(email: String, password: String): Result<FirebaseUser>
     suspend fun signInWithGoogle(idToken: String): Result<FirebaseUser>
     suspend fun signOut()
-    suspend fun getIdToken(): String?
+    suspend fun getIdToken(forceRefresh: Boolean = false): String?
 }
 
 class FirebaseAuthRepository : AuthRepository {
@@ -64,9 +64,9 @@ class FirebaseAuthRepository : AuthRepository {
         auth.signOut()
     }
 
-    override suspend fun getIdToken(): String? {
+    override suspend fun getIdToken(forceRefresh: Boolean): String? {
         return try {
-            auth.currentUser?.getIdToken(true)?.await()?.token
+            auth.currentUser?.getIdToken(forceRefresh)?.await()?.token
         } catch (e: Exception) {
             null
         }

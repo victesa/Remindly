@@ -31,4 +31,13 @@ interface ItemDao {
     fun getAllCategories(): Flow<List<String>>
     @Query("DELETE FROM Item WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM Item WHERE category = :category")
+    suspend fun deleteByCategory(category: String)
+
+    @Query("DELETE FROM Item WHERE category IS NULL OR category = ''")
+    suspend fun deleteUncategorized()
+
+    @Query("DELETE FROM Item WHERE status = 'PENDING'")
+    suspend fun deletePendingSync()
 }

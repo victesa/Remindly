@@ -17,10 +17,20 @@ class PdfTextExtractor(private val context: Context) {
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     suspend fun extractText(uri: Uri): String? {
-        Log.d("PdfTextExtractor", "Extracting text from PDF: $uri")
+        Log.d("PdfTextExtractor", "Extracting text from PDF: $uri, scheme: ${uri.scheme}")
         return try {
-            val fileDescriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+            val fileDescriptor = if (uri.scheme == "file") {
+                val path = uri.path ?: throw Exception("File path is null")
+                val file = File(path)
+                Log.d("PdfTextExtractor", "Opening file descriptor for path: $path, exists: ${file.exists()}, canRead: ${file.canRead()}")
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            } else {
+                Log.d("PdfTextExtractor", "Opening file descriptor via ContentResolver for URI: $uri")
+                context.contentResolver.openFileDescriptor(uri, "r")
+            } ?: throw Exception("File descriptor is null")
+
             val pdfRenderer = PdfRenderer(fileDescriptor)
+            Log.d("PdfTextExtractor", "PdfRenderer opened. Page count: ${pdfRenderer.pageCount}")
             
             val stringBuilder = StringBuilder()
             

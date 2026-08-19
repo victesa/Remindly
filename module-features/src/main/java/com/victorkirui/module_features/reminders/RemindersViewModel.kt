@@ -20,23 +20,64 @@ class RemindersViewModel(
 
     val uiState: StateFlow<RemindersUiState> = combine(
         localRepository.getAllRemindersWithItems(),
+        localRepository.getAllItems(),
         _selectedDate,
         _currentMonth
-    ) { allReminders, selectedDate, currentMonth ->
+    ) { allReminders, allItems, selectedDate, currentMonth ->
+        val today = LocalDate.now()
+        
+        // Group items for "Upcoming" section by date relationship
+        val upcomingGrouped = allItems
+            .filter { it.status != "DONE" }
+            .filter { 
+                val dateStr = it.deadline ?: it.eventDate
+                if (dateStr != null) {
+                    val date = parseDate(dateStr)
+                    !date.isBefore(today)
+                } else false
+            }
+            .groupBy { 
+                val date = parseDate(it.deadline ?: it.eventDate!!)
+                when {
+                    date == today -> "Today"
+                    date == today.plusDays(1) -> "Tomorrow"
+                    date.isBefore(today.plusWeeks(1)) -> "This Week"
+                    else -> "Later"
+                }
+            }
+
         RemindersUiState.Success(
             allReminders = allReminders,
+            allItems = allItems,
             selectedDate = selectedDate,
             currentMonth = currentMonth,
-            upcomingReminders = allReminders.filter { 
-                val reminderDate = LocalDate.parse(it.reminder.reminderDateTime.substring(0, 10))
-                !reminderDate.isBefore(LocalDate.now())
-            }
+            itemsForSelectedDate = allItems.filter { 
+                val dateStr = it.deadline ?: it.eventDate
+                dateStr != null && parseDate(dateStr) == selectedDate
+            },
+            upcomingGrouped = upcomingGrouped
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = RemindersUiState.Loading
     )
+
+    private fun parseDate(dateStr: String): LocalDate {
+        return try {
+            if (dateStr.contains("T")) {
+                if (dateStr.endsWith("Z")) {
+                    java.time.Instant.parse(dateStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                } else {
+                    java.time.LocalDateTime.parse(dateStr).toLocalDate()
+                }
+            } else {
+                LocalDate.parse(dateStr)
+            }
+        } catch (e: Exception) {
+            LocalDate.now() // Fallback
+        }
+    }
 
     fun onDateSelected(date: LocalDate) {
         _selectedDate.value = date
@@ -52,8 +93,10 @@ sealed class RemindersUiState {
     object Loading : RemindersUiState()
     data class Success(
         val allReminders: List<ReminderWithItem>,
+        val allItems: List<com.victorkirui.local.entity.Item>,
         val selectedDate: LocalDate,
         val currentMonth: YearMonth,
-        val upcomingReminders: List<ReminderWithItem>
+        val itemsForSelectedDate: List<com.victorkirui.local.entity.Item>,
+        val upcomingGrouped: Map<String, List<com.victorkirui.local.entity.Item>>
     ) : RemindersUiState()
 }

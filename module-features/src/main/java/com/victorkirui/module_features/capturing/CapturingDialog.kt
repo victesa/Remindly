@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -30,7 +31,13 @@ fun CapturingDialog(
     if (uiState is CapturingUiState.Idle) return
 
     Dialog(
-        onDismissRequest = { if (uiState is CapturingUiState.Success || uiState is CapturingUiState.Error || uiState is CapturingUiState.Overdue) onDismiss() },
+        onDismissRequest = { 
+            if (uiState is CapturingUiState.Success || 
+                uiState is CapturingUiState.Error || 
+                uiState is CapturingUiState.Overdue ||
+                uiState is CapturingUiState.SavedLocally
+            ) onDismiss() 
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -54,6 +61,7 @@ fun CapturingDialog(
                             when (uiState) {
                                 is CapturingUiState.Processing -> Color(0xFFEAF2EE)
                                 is CapturingUiState.Overdue -> Color(0xFFFFF4E5) // Light Orange
+                                is CapturingUiState.SavedLocally -> Color(0xFFE3F2FD) // Light Blue
                                 is CapturingUiState.Error -> Color(0xFFFFEBEE) // Light Red
                                 else -> Color(0xFF2D6A4F)
                             }
@@ -73,6 +81,14 @@ fun CapturingDialog(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = null,
                                 tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        is CapturingUiState.SavedLocally -> {
+                            Icon(
+                                imageVector = Icons.Default.CloudDone,
+                                contentDescription = null,
+                                tint = Color(0xFF1976D2), // Blue
                                 modifier = Modifier.size(32.dp)
                             )
                         }
@@ -101,6 +117,7 @@ fun CapturingDialog(
                 val title = when (uiState) {
                     CapturingUiState.Processing -> "Analysing Captures"
                     CapturingUiState.Success -> "Successfully Captured"
+                    is CapturingUiState.SavedLocally -> "Saved Offline"
                     is CapturingUiState.Error -> "Capture Failed"
                     is CapturingUiState.Overdue -> "Capture Rejected"
                     else -> ""
@@ -119,6 +136,7 @@ fun CapturingDialog(
                 val description = when (uiState) {
                     CapturingUiState.Processing -> "We're using AI to extract key details and set reminders for you. This will take a moment."
                     CapturingUiState.Success -> "Everything has been set up! You'll receive a notification shortly."
+                    is CapturingUiState.SavedLocally -> uiState.message
                     is CapturingUiState.Error -> uiState.message
                     is CapturingUiState.Overdue -> uiState.message
                     else -> ""
@@ -132,7 +150,21 @@ fun CapturingDialog(
                     lineHeight = 20.sp
                 )
 
-                if (uiState is CapturingUiState.Success || uiState is CapturingUiState.Error || uiState is CapturingUiState.Overdue) {
+                if (uiState is CapturingUiState.Success) {
+                    val strategy = "Strategy: Cloud Extraction" // This can be dynamic in future
+                    Text(
+                        text = strategy,
+                        fontSize = 11.sp,
+                        color = Color.LightGray,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                if (uiState is CapturingUiState.Success || 
+                    uiState is CapturingUiState.Error || 
+                    uiState is CapturingUiState.Overdue ||
+                    uiState is CapturingUiState.SavedLocally
+                ) {
                     Spacer(modifier = Modifier.height(32.dp))
                     Button(
                         onClick = onDismiss,

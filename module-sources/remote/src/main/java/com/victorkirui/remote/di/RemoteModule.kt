@@ -15,7 +15,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 val remoteModule = module {
-    single {
+    single<OkHttpClient> {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
@@ -27,30 +27,44 @@ val remoteModule = module {
             .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(logging)
             .addInterceptor { chain ->
-                val token = runBlocking { authRepository.getIdToken() }
-                val requestBuilder = chain.request().newBuilder()
-                    .addHeader("X-Tunnel-Skip-Anti-Phishing-Page", "true")
+                val getAuthToken = { force: Boolean -> runBlocking { authRepository.getIdToken(force) } }
+                var token = getAuthToken(false)
                 
-                if (token != null) {
-                    requestBuilder.addHeader("Authorization", "Bearer $token")
+                val buildRequest = { authToken: String? ->
+                    val builder = chain.request().newBuilder()
+                        .addHeader("X-Tunnel-Skip-Anti-Phishing-Page", "true")
+                    if (authToken != null) {
+                        builder.addHeader("Authorization", "Bearer $authToken")
+                    }
+                    builder.build()
                 }
-                
-                val request = requestBuilder.build()
-                Log.d("RemoteModule", "Sending request to: ${request.url}")
 
-                try {
-                    val response = chain.proceed(request)
-                    Log.d("RemoteModule", "Received response for ${response.request.url}: ${response.code}")
-                    response
-                } catch (e: Exception) {
-                    Log.e("RemoteModule", "Request failed for ${request.url}: ${e.message}", e)
-                    throw e
+                val initialRequest = buildRequest(token)
+                Log.d("RemoteModule", "Sending request to: ${initialRequest.url}")
+
+                var response = chain.proceed(initialRequest)
+                
+                // Adhere to 401 retry contract
+                if (response.code == 401) {
+                    Log.w("RemoteModule", "401 Unauthorized. Retrying with fresh token...")
+                    response.close()
+                    token = getAuthToken(true) // Force refresh
+                    val retryRequest = buildRequest(token)
+                    response = chain.proceed(retryRequest)
                 }
+
+                if (response.code == 402) {
+                    val bodyString = response.peekBody(1024 * 1024).string()
+                    Log.e("RemoteModule", "402 Payment Required detected! Response Body: $bodyString")
+                }
+
+                Log.d("RemoteModule", "Received response for ${response.request.url}: -> ${response.code}")
+                response
             }
             .build()
     }
 
-    single {
+    single<Retrofit> {
         val baseUrl = "https://remindly-backend.victorkirui-dev.workers.dev/"
         Log.d("RemoteModule", "Base URL: $baseUrl")
         Retrofit.Builder()
