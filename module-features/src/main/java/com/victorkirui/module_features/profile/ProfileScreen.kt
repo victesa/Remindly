@@ -1,7 +1,7 @@
 package com.victorkirui.module_features.profile
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
 import com.victorkirui.core.ui.theme.*
 import com.victorkirui.core.R
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,7 +35,6 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     var showTimePicker by remember { mutableStateOf(false) }
     val timePickerState = rememberTimePickerState(
@@ -69,10 +67,7 @@ fun ProfileScreen(
         onSignOut = onSignOut,
         onToggleMorningBriefing = viewModel::toggleMorningBriefing,
         onToggleDeadlineAlerts = viewModel::toggleDeadlineAlerts,
-        onShowTimePicker = { showTimePicker = true },
-        onThemeChange = viewModel::setDarkTheme,
-        onSendTestNotification = viewModel::sendTestNotification,
-        onScheduleTestReminder = viewModel::scheduleTestReminder
+        onShowTimePicker = { showTimePicker = true }
     )
 }
 
@@ -83,10 +78,7 @@ fun ProfileScreenContent(
     onSignOut: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit,
-    onThemeChange: (Boolean?) -> Unit,
-    onSendTestNotification: () -> Unit = {},
-    onScheduleTestReminder: () -> Unit = {}
+    onShowTimePicker: () -> Unit
 ) {
     Scaffold(
         containerColor = Color.White
@@ -98,8 +90,7 @@ fun ProfileScreenContent(
                 onSignOut = onSignOut,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker,
-                onThemeChange = onThemeChange
+                onShowTimePicker = onShowTimePicker
             )
             WindowWidthSizeClass.Expanded -> ProfileLargeContent(
                 state = uiState,
@@ -107,8 +98,7 @@ fun ProfileScreenContent(
                 onSignOut = onSignOut,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker,
-                onThemeChange = onThemeChange
+                onShowTimePicker = onShowTimePicker
             )
             else -> ProfileSmallContent(
                 state = uiState,
@@ -116,10 +106,7 @@ fun ProfileScreenContent(
                 onSignOut = onSignOut,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker,
-                onThemeChange = onThemeChange,
-                onSendTestNotification = onSendTestNotification,
-                onScheduleTestReminder = onScheduleTestReminder
+                onShowTimePicker = onShowTimePicker
             )
         }
     }
@@ -147,10 +134,7 @@ fun ProfileSmallContent(
     onSignOut: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit,
-    onThemeChange: (Boolean?) -> Unit,
-    onSendTestNotification: () -> Unit = {},
-    onScheduleTestReminder: () -> Unit = {}
+    onShowTimePicker: () -> Unit
 ) {
     Column(
         modifier = modifier
@@ -184,18 +168,12 @@ fun ProfileSmallContent(
         Spacer(modifier = Modifier.height(32.dp))
         
         ProfileSectionHeader("GENERAL")
-        GeneralCard(
-            isDarkTheme = state.isDarkTheme,
-            onThemeChange = onThemeChange
-        )
+        GeneralCard()
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        ProfileSectionHeader("DEBUG & TESTING")
-        DebugCard(
-            onSendTestNotification = onSendTestNotification,
-            onScheduleTestReminder = onScheduleTestReminder
-        )
+        ProfileSectionHeader("FEEDBACK & RATING")
+        SupportCard()
         
         Spacer(modifier = Modifier.height(48.dp))
         
@@ -223,8 +201,7 @@ fun ProfileMediumContent(
     onSignOut: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit,
-    onThemeChange: (Boolean?) -> Unit
+    onShowTimePicker: () -> Unit
 ) {
     Row(
         modifier = modifier
@@ -246,10 +223,7 @@ fun ProfileMediumContent(
             Spacer(modifier = Modifier.height(32.dp))
             
             ProfileSectionHeader("GENERAL")
-            GeneralCardMedium(
-                isDarkTheme = state.isDarkTheme,
-                onThemeChange = onThemeChange
-            )
+            GeneralCardMedium()
         }
 
         VerticalDivider(
@@ -282,7 +256,7 @@ fun ProfileMediumContent(
             
             Spacer(modifier = Modifier.height(24.dp))
             
-            ProfileSectionHeader("SUPPORT")
+            ProfileSectionHeader("FEEDBACK & RATING")
             SupportCardMedium()
             
             Spacer(modifier = Modifier.height(40.dp))
@@ -312,8 +286,7 @@ fun ProfileLargeContent(
     onSignOut: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit,
-    onThemeChange: (Boolean?) -> Unit
+    onShowTimePicker: () -> Unit
 ) {
     Row(
         modifier = modifier
@@ -372,14 +345,11 @@ fun ProfileLargeContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(modifier = Modifier.weight(1f)) {
                     ProfileSectionHeader("GENERAL")
-                    GeneralCardLarge(
-                        isDarkTheme = state.isDarkTheme,
-                        onThemeChange = onThemeChange
-                    )
+                    GeneralCardLarge()
                 }
                 
                 Column(modifier = Modifier.weight(1f)) {
-                    ProfileSectionHeader("SUPPORT")
+                    ProfileSectionHeader("FEEDBACK & RATING")
                     SupportCardLarge()
                 }
             }
@@ -498,41 +468,22 @@ fun NotificationsCardLarge(
 }
 
 @Composable
-fun GeneralCardLarge(
-    isDarkTheme: Boolean?,
-    onThemeChange: (Boolean?) -> Unit
-) {
+fun GeneralCardLarge() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = Color(0xFFF9FAF9)
     ) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            var showThemeDialog by remember { mutableStateOf(false) }
-
-            if (showThemeDialog) {
-                ThemeSelectionDialog(
-                    isDarkTheme = isDarkTheme,
-                    onThemeChange = onThemeChange,
-                    onDismiss = { showThemeDialog = false }
-                )
-            }
-
-            SettingItemMedium(
-                title = "Appearance",
-                value = when(isDarkTheme) {
-                    true -> "Dark"
-                    false -> "Light"
-                    null -> "System Default"
-                },
-                icon = Icons.Outlined.LightMode,
-                onClick = { showThemeDialog = true }
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
             SettingItemMedium(
                 title = "Privacy & Data",
                 value = null,
-                icon = Icons.Outlined.Shield
+                icon = Icons.Outlined.Shield,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    context.startActivity(intent)
+                }
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
             SettingItemMedium(
@@ -546,6 +497,7 @@ fun GeneralCardLarge(
 
 @Composable
 fun SupportCardLarge() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -555,19 +507,25 @@ fun SupportCardLarge() {
             SettingItemMedium(
                 title = "Send Feedback",
                 value = null,
-                icon = Icons.Outlined.ChatBubbleOutline
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
-            SettingItemMedium(
-                title = "Help Center",
-                value = null,
-                icon = Icons.Outlined.HelpOutline
+                icon = Icons.Outlined.ChatBubbleOutline,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:")
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
+                    }
+                    context.startActivity(intent)
+                }
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
             SettingItemMedium(
                 title = "Rate Remindly",
                 value = null,
-                icon = Icons.Outlined.StarOutline
+                icon = Icons.Outlined.StarOutline,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
+                    context.startActivity(intent)
+                }
             )
         }
     }
@@ -660,99 +618,21 @@ fun ProfileSectionHeader(title: String) {
 }
 
 @Composable
-fun ThemeSelectionDialog(
-    isDarkTheme: Boolean?,
-    onThemeChange: (Boolean?) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Choose Appearance") },
-        text = {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onThemeChange(false)
-                            onDismiss()
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isDarkTheme == false, onClick = null)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Light")
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onThemeChange(true)
-                            onDismiss()
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isDarkTheme == true, onClick = null)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Dark")
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onThemeChange(null)
-                            onDismiss()
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isDarkTheme == null, onClick = null)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("System Default")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        }
-    )
-}
-
-@Composable
-fun GeneralCard(
-    isDarkTheme: Boolean?,
-    onThemeChange: (Boolean?) -> Unit
-) {
+fun GeneralCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = Color(0xFFF9FAF9)
     ) {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
-            var showThemeDialog by remember { mutableStateOf(false) }
-            
-            if (showThemeDialog) {
-                ThemeSelectionDialog(
-                    isDarkTheme = isDarkTheme,
-                    onThemeChange = onThemeChange,
-                    onDismiss = { showThemeDialog = false }
-                )
-            }
-
-            SettingItem(
-                title = "Appearance",
-                value = when(isDarkTheme) {
-                    true -> "Dark"
-                    false -> "Light"
-                    null -> "System Default"
-                },
-                onClick = { showThemeDialog = true }
-            )
             SettingItem(
                 title = "Privacy & Data",
-                value = null
+                value = null,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    context.startActivity(intent)
+                }
             )
             SettingItem(
                 title = "About Remindly",
@@ -763,45 +643,27 @@ fun GeneralCard(
 }
 
 @Composable
-fun GeneralCardMedium(
-    isDarkTheme: Boolean?,
-    onThemeChange: (Boolean?) -> Unit
-) {
+fun GeneralCardMedium() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = Color(0xFFF9FAF9)
     ) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            var showThemeDialog by remember { mutableStateOf(false) }
-
-            if (showThemeDialog) {
-                ThemeSelectionDialog(
-                    isDarkTheme = isDarkTheme,
-                    onThemeChange = onThemeChange,
-                    onDismiss = { showThemeDialog = false }
-                )
-            }
-
-            SettingItemMedium(
-                title = "Appearance",
-                value = when(isDarkTheme) {
-                    true -> "Dark"
-                    false -> "Light"
-                    null -> "System Default"
-                },
-                icon = Icons.Outlined.CheckCircleOutline,
-                onClick = { showThemeDialog = true }
-            )
             SettingItemMedium(
                 title = "Privacy & Data",
                 value = null,
-                icon = Icons.Outlined.CheckCircleOutline
+                icon = Icons.Outlined.Shield,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    context.startActivity(intent)
+                }
             )
             SettingItemMedium(
                 title = "About Remindly",
                 value = "v1.0.0",
-                icon = Icons.Outlined.HelpOutline
+                icon = Icons.Outlined.Info
             )
         }
     }
@@ -809,6 +671,7 @@ fun GeneralCardMedium(
 
 @Composable
 fun SupportCardMedium() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -818,17 +681,57 @@ fun SupportCardMedium() {
             SettingItemMedium(
                 title = "Send Feedback",
                 value = null,
-                icon = Icons.Outlined.ChatBubbleOutline
-            )
-            SettingItemMedium(
-                title = "Help Center",
-                value = null,
-                icon = Icons.Outlined.HelpOutline
+                icon = Icons.Outlined.ChatBubbleOutline,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:")
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
+                    }
+                    context.startActivity(intent)
+                }
             )
             SettingItemMedium(
                 title = "Rate Remindly",
                 value = null,
-                icon = Icons.Outlined.StarOutline
+                icon = Icons.Outlined.StarOutline,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
+                    context.startActivity(intent)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun SupportCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFF9FAF9)
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            SettingItem(
+                title = "Send Feedback",
+                value = "Email victorkirui.dev@gmail.com",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:")
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
+                    }
+                    context.startActivity(intent)
+                }
+            )
+            SettingItem(
+                title = "Rate Remindly",
+                value = "On Google Play Store",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
+                    context.startActivity(intent)
+                }
             )
         }
     }
@@ -908,31 +811,6 @@ fun NotificationItemMedium(title: String, subtitle: String, checked: Boolean, ic
             ),
             modifier = Modifier.scale(0.85f)
         )
-    }
-}
-
-@Composable
-fun DebugCard(
-    onSendTestNotification: () -> Unit,
-    onScheduleTestReminder: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = Color(0xFFF9FAF9)
-    ) {
-        Column(modifier = Modifier.padding(vertical = 12.dp)) {
-            SettingItem(
-                title = "Send Immediate Notification",
-                value = "Test system notifications now",
-                onClick = onSendTestNotification
-            )
-            SettingItem(
-                title = "Schedule 10s Test Reminder",
-                value = "Test AlarmManager scheduling",
-                onClick = onScheduleTestReminder
-            )
-        }
     }
 }
 
@@ -1032,8 +910,7 @@ fun ProfileSmallScreenPreview() {
             onSignOut = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {},
-            onThemeChange = {}
+            onShowTimePicker = {}
         )
     }
 }
@@ -1051,8 +928,7 @@ fun ProfileMediumScreenPreview() {
             onSignOut = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {},
-            onThemeChange = {}
+            onShowTimePicker = {}
         )
     }
 }
@@ -1070,8 +946,7 @@ fun ProfileLargeScreenPreview() {
             onSignOut = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {},
-            onThemeChange = {}
+            onShowTimePicker = {}
         )
     }
 }
