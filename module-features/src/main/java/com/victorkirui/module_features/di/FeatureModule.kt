@@ -17,9 +17,6 @@ import com.victorkirui.module_features.capturing.ai.AiExtractor
 import com.victorkirui.module_features.capturing.ai.RemindlyBackendExtractor
 import com.victorkirui.module_features.onboarding.OnboardingViewModel
 import com.victorkirui.module_features.BuildConfig
-import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import org.koin.android.ext.koin.androidContext
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
@@ -35,15 +32,19 @@ val featureModule = module {
     single<AiExtractor> { 
         RemindlyBackendExtractor(
             context = androidContext(),
-            backendBaseUrl = "https://8wzmrlnc-3000.uks1.devtunnels.ms"
+            subscriptionRepository = get(),
+            backendBaseUrl = "https://remindly-backend-v2.victorkirui-dev.workers.dev"
         ) 
     }
     factory { 
         CapturingUseCase(
             context = androidContext(),
+            authRepository = get(),
             localRepository = get(),
+            subscriptionRepository = get(),
             aiExtractor = get(),
             reminderScheduler = get(),
+            calendarManager = get(),
             pdfTextExtractor = get(),
             timestampProvider = { 
                 SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
@@ -52,21 +53,26 @@ val featureModule = module {
             }
         ) 
     }
-    viewModel { CapturingViewModel(get(), get()) }
-    viewModel { ItemDetailsViewModel(get()) }
-    viewModel { EditItemViewModel(get()) }
-    viewModel { RemindersViewModel(get()) }
-    viewModel { InboxViewModel(get()) }
-    viewModel { HomeViewModel(get()) }
-    viewModel { CategoryDetailViewModel(get()) }
+    viewModel { 
+        CapturingViewModel(
+            capturingUseCase = get(),
+            notificationHelper = get(),
+            analytics = get(),
+            crashReporter = get()
+        ) 
+    }
+    viewModel { ItemDetailsViewModel(get(), get(), get(), get(), get(), androidContext()) }
+    viewModel { EditItemViewModel(get(), get(), get(), get(), get()) }
+    viewModel { RemindersViewModel(get(), get()) }
+    viewModel { InboxViewModel(get(), get(), get(), get()) }
+    viewModel { HomeViewModel(get(), get(), get(), get(), androidContext()) }
+    viewModel { CategoryDetailViewModel(get(), get(), get(), get()) }
     viewModel { 
         ProfileViewModel(
             settingsRepository = get(),
-            themeRepository = get(),
+            subscriptionRepository = get(),
             authRepository = get(),
-            notificationHelper = get(),
-            reminderScheduler = get(),
-            localRepository = get()
+            reminderScheduler = get()
         ) 
     }
     viewModel { SignUpViewModel(get()) }

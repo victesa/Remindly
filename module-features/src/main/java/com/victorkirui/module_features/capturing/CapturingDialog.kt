@@ -5,11 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,7 +31,8 @@ fun CapturingDialog(
             if (uiState is CapturingUiState.Success || 
                 uiState is CapturingUiState.Error || 
                 uiState is CapturingUiState.Overdue ||
-                uiState is CapturingUiState.SavedLocally
+                uiState is CapturingUiState.SavedLocally ||
+                uiState is CapturingUiState.UpgradeRequired
             ) onDismiss() 
         },
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -46,8 +43,8 @@ fun CapturingDialog(
                 .fillMaxWidth()
                 .wrapContentHeight(),
             shape = RoundedCornerShape(28.dp),
-            color = Color.White,
-            tonalElevation = 4.dp
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
@@ -63,6 +60,8 @@ fun CapturingDialog(
                                 is CapturingUiState.Overdue -> Color(0xFFFFF4E5) // Light Orange
                                 is CapturingUiState.SavedLocally -> Color(0xFFE3F2FD) // Light Blue
                                 is CapturingUiState.Error -> Color(0xFFFFEBEE) // Light Red
+                                is CapturingUiState.UpgradeRequired -> Color(0xFFF3E5F5) // Light Purple
+                                is CapturingUiState.Duplicate -> Color(0xFFE0F2F1) // Light Teal
                                 else -> Color(0xFF2D6A4F)
                             }
                         ),
@@ -108,6 +107,22 @@ fun CapturingDialog(
                                 modifier = Modifier.size(32.dp)
                             )
                         }
+                        is CapturingUiState.UpgradeRequired -> {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFF9C27B0), // Purple
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                        is CapturingUiState.Duplicate -> {
+                            Icon(
+                                imageVector = Icons.Default.CopyAll,
+                                contentDescription = null,
+                                tint = Color(0xFF009688), // Teal
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
                         else -> {}
                     }
                 }
@@ -120,6 +135,8 @@ fun CapturingDialog(
                     is CapturingUiState.SavedLocally -> "Saved Offline"
                     is CapturingUiState.Error -> "Capture Failed"
                     is CapturingUiState.Overdue -> "Capture Rejected"
+                    is CapturingUiState.UpgradeRequired -> "Premium Feature"
+                    is CapturingUiState.Duplicate -> "Already Captured"
                     else -> ""
                 }
 
@@ -127,7 +144,7 @@ fun CapturingDialog(
                     text = title,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF111111),
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
 
@@ -139,19 +156,21 @@ fun CapturingDialog(
                     is CapturingUiState.SavedLocally -> uiState.message
                     is CapturingUiState.Error -> uiState.message
                     is CapturingUiState.Overdue -> uiState.message
+                    is CapturingUiState.UpgradeRequired -> uiState.message
+                    is CapturingUiState.Duplicate -> "This item is already in your inbox. No need to save it again!"
                     else -> ""
                 }
 
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF6B7C6E),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp
                 )
 
                 if (uiState is CapturingUiState.Success) {
-                    val strategy = "Strategy: Cloud Extraction" // This can be dynamic in future
+                    val strategy = "Strategy: Cloud Extraction"
                     Text(
                         text = strategy,
                         fontSize = 11.sp,
@@ -163,16 +182,32 @@ fun CapturingDialog(
                 if (uiState is CapturingUiState.Success || 
                     uiState is CapturingUiState.Error || 
                     uiState is CapturingUiState.Overdue ||
-                    uiState is CapturingUiState.SavedLocally
+                    uiState is CapturingUiState.SavedLocally ||
+                    uiState is CapturingUiState.UpgradeRequired ||
+                    uiState is CapturingUiState.Duplicate
                 ) {
                     Spacer(modifier = Modifier.height(32.dp))
                     Button(
                         onClick = onDismiss,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = when (uiState) {
+                                is CapturingUiState.UpgradeRequired -> Color(0xFF9C27B0)
+                                is CapturingUiState.Duplicate -> Color(0xFF009688)
+                                else -> Color(0xFF2D6A4F)
+                            }
+                        ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Done", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            when (uiState) {
+                                is CapturingUiState.UpgradeRequired -> "View Plans"
+                                is CapturingUiState.Duplicate -> "Dismiss"
+                                else -> "Done"
+                            },
+                            fontWeight = FontWeight.Bold, 
+                            fontSize = 16.sp
+                        )
                     }
                 } else {
                     Spacer(modifier = Modifier.height(16.dp))

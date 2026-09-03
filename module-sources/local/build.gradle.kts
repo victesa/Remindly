@@ -34,4 +34,5 @@ dependencies {
     implementation(libs.room.coroutines)
     implementation(libs.koin.android)
     implementation(libs.retrofit.converter.gson)
+    implementation(project(":core"))
 }

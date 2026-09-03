@@ -25,10 +25,20 @@ class ShareActivity : ComponentActivity() {
         if (intent == null) return
 
         val source = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                referrer?.host ?: "Unknown"
+            val ref = referrer?.host
+            if (ref != null) {
+                ref
             } else {
-                "Unknown"
+                // Try to get from Intent extras if referrer is missing
+                val extraRef = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_REFERRER, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_REFERRER) as? Uri
+                }
+                extraRef?.host
+                    ?: intent.getStringExtra(Intent.EXTRA_REFERRER_NAME)
+                    ?: "Unknown"
             }
         } catch (e: Exception) { "Unknown" }
 

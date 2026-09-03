@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Remindly</string>
+    <string name="small_calendar_widget_description">Small 2x1 calendar widget showing today\'s date and items count</string>
+    <string name="medium_calendar_widget_description">Medium 4x2 calendar widget showing current month, week strip, items count, and quick capture button</string>
+    <string name="large_calendar_widget_description">Large 4x4 calendar widget showing full interactive month grid, task indicator dots, and quick capture button</string>
+    <string name="small_upcoming_widget_description">Small 2x1 upcoming deadline widget showing the next upcoming task and days remaining badge</string>
+    <string name="medium_upcoming_widget_description">Medium 4x2 upcoming deadline widget showing top 3 upcoming deadlines with date headers and urgency badges</string>
+    <string name="large_upcoming_widget_description">Large 4x4 upcoming deadline widget showing categorized urgent and upcoming deadlines with cards, categories, and quick capture button</string>
 </resources>

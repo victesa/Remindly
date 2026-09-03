@@ -68,4 +68,5 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)
+    implementation(libs.play.billing.ktx)
 }

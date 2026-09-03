@@ -33,6 +33,7 @@ fun RemindlyNavigationRail(
         modifier = Modifier
             .width(80.dp)
             .fillMaxHeight()
+            .statusBarsPadding()
             .padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

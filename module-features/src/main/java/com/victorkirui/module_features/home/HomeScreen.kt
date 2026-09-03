@@ -3,6 +3,7 @@ package com.victorkirui.module_features.home
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -11,6 +12,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,10 +39,12 @@ import com.victorkirui.local.entity.Item
 import com.victorkirui.core.util.DateUtils
 import com.victorkirui.module_features.capturing.SourceIcon
 import com.victorkirui.module_features.capturing.SourceIconProvider
+import com.victorkirui.module_features.capturing.SyncDownWorker
 import com.victorkirui.module_features.inbox.SearchField
 import androidx.compose.ui.text.style.TextOverflow
 import org.koin.androidx.compose.koinViewModel
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.*
@@ -55,6 +60,12 @@ fun HomeScreen(
     viewModel: HomeViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        SyncDownWorker.schedule(context)
+    }
+
     HomeScreen(
         uiState = uiState,
         windowWidthSizeClass = windowWidthSizeClass,
@@ -63,10 +74,13 @@ fun HomeScreen(
         onNavigateToProfile = onNavigateToProfile,
         onNavigateToItem = onNavigateToItem,
         onCaptureClick = onCaptureClick,
-        onSearchQueryChange = { viewModel.onSearchQueryChange(it) }
+        onSearchQueryChange = { viewModel.onSearchQueryChange(it) },
+        onNameUpdate = { viewModel.updateUserName(it) },
+        onRefresh = { viewModel.refresh() }
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
@@ -76,52 +90,77 @@ fun HomeScreen(
     onNavigateToProfile: () -> Unit = {},
     onNavigateToItem: (String) -> Unit = {},
     onCaptureClick: () -> Unit = {},
-    onSearchQueryChange: (String) -> Unit = {}
+    onSearchQueryChange: (String) -> Unit = {},
+    onNameUpdate: (String) -> Unit = {},
+    onRefresh: () -> Unit = {}
 ) {
     val isLargeScreen = windowWidthSizeClass == WindowWidthSizeClass.Expanded
     val isMediumScreen = windowWidthSizeClass == WindowWidthSizeClass.Medium
-    var isSearchVisible by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
+    var isSearchSheetVisible by remember { mutableStateOf(false) }
 
     val searchQuery = (uiState as? HomeUiState.Success)?.searchQuery ?: ""
+    val searchResults = (uiState as? HomeUiState.Success)?.searchResults ?: emptyList()
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
-        if (!isLargeScreen && !isMediumScreen) {
-            RemindlyTopBar(
-                onSearchToggle = { 
-                    isSearchVisible = !isSearchVisible
-                    if (!isSearchVisible) {
-                        onSearchQueryChange("")
-                        focusManager.clearFocus()
-                    }
-                },
-                isSearchActive = isSearchVisible
-            ) 
-        } 
+    if (isSearchSheetVisible) {
+        SearchSheet(
+            searchQuery = searchQuery,
+            onSearchQueryChange = onSearchQueryChange,
+            searchResults = searchResults,
+            onNavigateToItem = onNavigateToItem,
+            onDismiss = {
+                isSearchSheetVisible = false
+                onSearchQueryChange("")
+            }
+        )
+    }
 
-        AnimatedVisibility(
-            visible = isSearchVisible && !isLargeScreen && !isMediumScreen,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+    val pullRefreshState = rememberPullToRefreshState()
+    val isSyncingFromState = (uiState as? HomeUiState.Success)?.isSyncing ?: false
+    var displaySyncIndicator by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isSyncingFromState) {
+        if (isSyncingFromState) {
+            displaySyncIndicator = true
+            // Safety timeout: Never irritate user with endless progress display (max 5s)
+            kotlinx.coroutines.delay(5000L)
+            displaySyncIndicator = false
+        } else {
+            displaySyncIndicator = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pullToRefresh(
+                state = pullRefreshState,
+                isRefreshing = displaySyncIndicator,
+                onRefresh = onRefresh
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+                .statusBarsPadding()
         ) {
-            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                SearchField(
-                    placeholder = "Search captures...",
-                    text = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier.focusRequester(focusRequester)
+            if (!isLargeScreen && !isMediumScreen) {
+                RemindlyTopBar(
+                    onSearchToggle = { isSearchSheetVisible = true },
+                    isSearchActive = isSearchSheetVisible,
+                    subscriptionTier = (uiState as? HomeUiState.Success)?.subscriptionTier ?: com.victorkirui.core.repository.SubscriptionTier.FREE
+                ) 
+            } 
+            
+            if (displaySyncIndicator) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(2.dp),
+                    color = Color(0xFF2D6A4F),
+                    trackColor = Color.Transparent
                 )
             }
             
-            LaunchedEffect(isSearchVisible) {
-                if (isSearchVisible) {
-                    focusRequester.requestFocus()
-                }
-            }
-        }
-        
-        when (val state = uiState) {
+            when (val state = uiState) {
             HomeUiState.Loading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color(0xFF2D6A4F))
@@ -133,14 +172,14 @@ fun HomeScreen(
                         state = state,
                         modifier = Modifier.weight(1f),
                         onNavigateToItem = onNavigateToItem,
-                        onSearchQueryChange = onSearchQueryChange,
+                        onSearchClick = { isSearchSheetVisible = true },
                         onCaptureClick = onCaptureClick
                     )
                     WindowWidthSizeClass.Medium -> HomeScreenMediumContent(
                         state = state,
                         modifier = Modifier.weight(1f),
                         onNavigateToItem = onNavigateToItem,
-                        onSearchQueryChange = onSearchQueryChange,
+                        onSearchClick = { isSearchSheetVisible = true },
                         onCaptureClick = onCaptureClick
                     )
                     else -> HomeScreenContent(
@@ -154,9 +193,10 @@ fun HomeScreen(
         }
     }
 }
+}
 
 @Composable
-fun RemindlyTopBar(onSearchToggle: () -> Unit = {}, isSearchActive: Boolean = false) {
+fun RemindlyTopBar(onSearchToggle: () -> Unit = {}, isSearchActive: Boolean = false, subscriptionTier: com.victorkirui.core.repository.SubscriptionTier = com.victorkirui.core.repository.SubscriptionTier.FREE) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -164,13 +204,30 @@ fun RemindlyTopBar(onSearchToggle: () -> Unit = {}, isSearchActive: Boolean = fa
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            "Remindly",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF2D6A4F),
-            letterSpacing = (-0.5).sp
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Remindly",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF2D6A4F),
+                letterSpacing = (-0.5).sp
+            )
+            if (subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    color = Color(0xFFB8860B),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "Pro",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
         IconButton(onClick = onSearchToggle) {
             Icon(
                 if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
@@ -190,6 +247,7 @@ fun HomeScreenContent(
     onNavigateToItem: (String) -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
+    val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
     
     Column(
         modifier = modifier
@@ -197,27 +255,69 @@ fun HomeScreenContent(
             .verticalScroll(scrollState)
             .padding(horizontal = 20.dp)
     ) {
-        GreetingSection(userName = "Victor", attentionCount = state.todayItems.size)
+        GreetingSection(
+            userName = state.userName, 
+            attentionCount = state.todayItems.size,
+            isPremium = isPremium
+        )
         
         Spacer(modifier = Modifier.height(24.dp))
         
         CalendarStrip(items = state.allItems)
         
+        if (isPremium && state.isCalendarSyncEnabled) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Sync,
+                    contentDescription = null,
+                    tint = Color(0xFF4285F4),
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    "Auto-sync enabled",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                    fontSize = 10.sp
+                )
+            }
+        }
+        
         Spacer(modifier = Modifier.height(32.dp))
         
         SectionHeader("TODAY")
         if (state.todayItems.isNotEmpty()) {
-            state.todayItems.forEach { item ->
-                TaskItem(
-                    title = item.title,
-                    time = item.eventDate ?: "Today",
-                    icon = Icons.Default.AccessTime,
-                    iconBgColor = Color(0xFFEAF2EE),
-                    tag = "Today",
-                    tagColor = Color(0xFFFEF5E7),
-                    tagTextColor = Color(0xFFD35400),
-                    onClick = { onNavigateToItem(item.id) }
-                )
+            state.todayItems.take(2).forEach { item ->
+                val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
+                    ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
+                    ?: "Today"
+                
+                if (isPremium) {
+                    ProTaskItem(
+                        title = item.title,
+                        time = displayTime,
+                        summary = item.summary,
+                        tag = "Today",
+                        onClick = { onNavigateToItem(item.id) }
+                    )
+                } else {
+                    TaskItem(
+                        title = item.title,
+                        time = displayTime,
+                        icon = Icons.Default.AccessTime,
+                        iconBgColor = Color(0xFFEAF2EE),
+                        tag = "Today",
+                        tagColor = Color(0xFFFEF5E7),
+                        tagTextColor = Color(0xFFD35400),
+                        onClick = { onNavigateToItem(item.id) }
+                    )
+                }
                 Spacer(modifier = Modifier.height(12.dp))
             }
         } else {
@@ -228,7 +328,7 @@ fun HomeScreenContent(
         
         SectionHeader("LAST ANALYSED")
         if (state.lastAnalysed.isNotEmpty()) {
-            AnalysedSection(state.lastAnalysed.take(3), onNavigateToItem = onNavigateToItem)
+            AnalysedSection(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
         } else {
             EmptySectionPlaceholder("Recent captures will appear here.")
         }
@@ -239,12 +339,21 @@ fun HomeScreenContent(
         if (state.upcomingItems.isNotEmpty()) {
             state.upcomingItems.take(3).forEach { item ->
                 val deadline = item.deadline
-                val daysLeft = if (deadline != null) ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) else 0
+                val daysLeft = if (deadline != null) {
+                    try {
+                        ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                    } catch (e: Exception) { 0 }
+                } else 0
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 UpcomingTaskItem(
                     title = item.title,
                     subtitle = item.organization ?: item.source ?: "",
-                    tag = "$daysLeft days left",
+                    tag = when {
+                        daysLeft == 0L -> "Today"
+                        daysLeft == 1L -> "1 day left"
+                        daysLeft < 0 -> "Overdue"
+                        else -> "$daysLeft days left"
+                    },
                     iconRes = (icon as? SourceIcon.Resource)?.resId,
                     icon = (icon as? SourceIcon.Vector)?.imageVector,
                     onClick = { onNavigateToItem(item.id) }
@@ -264,8 +373,8 @@ fun EmptySectionPlaceholder(text: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFFF9FAF9),
-        border = BorderStroke(1.dp, Color(0xFFEEEEEE))
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
         Box(
             modifier = Modifier.padding(24.dp),
@@ -274,7 +383,7 @@ fun EmptySectionPlaceholder(text: String) {
             Text(
                 text,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
@@ -286,16 +395,24 @@ fun HomeScreenLargeContent(
     state: HomeUiState.Success,
     modifier: Modifier = Modifier,
     onNavigateToItem: (String) -> Unit = {},
-    onSearchQueryChange: (String) -> Unit = {},
+    onSearchClick: () -> Unit = {},
     onCaptureClick: () -> Unit = {}
 ) {
+    val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
+    
     Row(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            GreetingSection(userName = "Victor", attentionCount = state.todayItems.size, titleSize = 22.sp, titleColor = Color(0xFF111111))
+            GreetingSection(
+                userName = state.userName, 
+                attentionCount = state.todayItems.size, 
+                titleSize = 22.sp, 
+                titleColor = Color(0xFF111111),
+                isPremium = isPremium
+            )
             Spacer(modifier = Modifier.height(32.dp))
             MonthCalendar(
                 items = state.allItems,
@@ -305,6 +422,27 @@ fun HomeScreenLargeContent(
                 labelColor = Color(0xFF6B7C6E),
                 dateColor = Color(0xFF111111)
             )
+            
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.CalendarToday,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Google Calendar synced",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
             
             Spacer(modifier = Modifier.weight(1f))
             
@@ -323,7 +461,7 @@ fun HomeScreenLargeContent(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("New Capture", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Capture", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -335,29 +473,40 @@ fun HomeScreenLargeContent(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
         ) {
-            LargeSearchBar(
-                text = state.searchQuery,
-                onValueChange = onSearchQueryChange
-            )
+            LargeSearchBar(onClick = onSearchClick)
             Spacer(modifier = Modifier.height(32.dp))
 
             SectionHeader("TODAY", fontSize = 12.sp, color = Color(0xFF6B7C6E))
             if (state.todayItems.isNotEmpty()) {
-                state.todayItems.forEach { item ->
-                    TaskItem(
-                        title = item.title,
-                        time = item.eventDate ?: "Today",
-                        icon = Icons.Default.AccessTime,
-                        iconBgColor = Color(0xFFEAF2EE),
-                        tag = "Today",
-                        tagColor = Color(0xFFFEF5E7),
-                        tagTextColor = Color(0xFF2D6A4F),
-                        titleFontSize = 15.sp,
-                        titleColor = Color(0xFF111111),
-                        timeColor = Color(0xFF6B7C6E),
-                        tagFontSize = 11.sp,
-                        onClick = { onNavigateToItem(item.id) }
-                    )
+                state.todayItems.take(2).forEach { item ->
+                    val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
+                        ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
+                        ?: "Today"
+                    
+                    if (isPremium) {
+                        ProTaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            summary = item.summary,
+                            tag = "Today",
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    } else {
+                        TaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            icon = Icons.Default.AccessTime,
+                            iconBgColor = Color(0xFFEAF2EE),
+                            tag = "Today",
+                            tagColor = Color(0xFFFEF5E7),
+                            tagTextColor = Color(0xFF2D6A4F),
+                            titleFontSize = 15.sp,
+                            titleColor = Color(0xFF111111),
+                            timeColor = Color(0xFF6B7C6E),
+                            tagFontSize = 11.sp,
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
             } else {
@@ -368,7 +517,7 @@ fun HomeScreenLargeContent(
 
             SectionHeader("LAST ANALYSED", fontSize = 12.sp, color = Color(0xFF6B7C6E))
             if (state.lastAnalysed.isNotEmpty()) {
-                AnalysedSectionLarge(state.lastAnalysed, onNavigateToItem = onNavigateToItem)
+                AnalysedSectionLarge(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
             } else {
                 EmptySectionPlaceholder("Recent captures will appear here.")
             }
@@ -379,12 +528,21 @@ fun HomeScreenLargeContent(
             if (state.upcomingItems.isNotEmpty()) {
                 state.upcomingItems.take(3).forEach { item ->
                     val deadline = item.deadline
-                    val daysLeft = if (deadline != null) ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) else 0
+                    val daysLeft = if (deadline != null) {
+                        try {
+                            ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                        } catch (e: Exception) { 0 }
+                    } else 0
                     val icon = SourceIconProvider.getIconForSource(item.source)
                     UpcomingTaskItem(
                         title = item.title,
                         subtitle = item.organization ?: item.source ?: "",
-                        tag = "$daysLeft days left",
+                        tag = when {
+                            daysLeft == 0L -> "Today"
+                            daysLeft == 1L -> "1 day left"
+                            daysLeft < 0 -> "Overdue"
+                            else -> "$daysLeft days left"
+                        },
                         iconRes = (icon as? SourceIcon.Resource)?.resId,
                         icon = (icon as? SourceIcon.Vector)?.imageVector,
                         titleSize = 15.sp,
@@ -408,9 +566,11 @@ fun HomeScreenMediumContent(
     state: HomeUiState.Success,
     modifier: Modifier = Modifier,
     onNavigateToItem: (String) -> Unit = {},
-    onSearchQueryChange: (String) -> Unit = {},
+    onSearchClick: () -> Unit = {},
     onCaptureClick: () -> Unit = {}
 ) {
+    val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
+
     Row(
         modifier = modifier
             .fillMaxSize()
@@ -418,6 +578,28 @@ fun HomeScreenMediumContent(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             MonthCalendar(items = state.allItems, showLegend = true, dayFontSize = 13.sp)
+            
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.CalendarToday,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Google Calendar synced",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.weight(1f))
             
             Surface(
@@ -434,7 +616,13 @@ fun HomeScreenMediumContent(
             }
             
             Spacer(modifier = Modifier.height(16.dp))
-            GreetingSection(userName = "Victor", attentionCount = state.todayItems.size, titleSize = 20.sp, bodySize = 13.sp)
+            GreetingSection(
+                userName = state.userName, 
+                attentionCount = state.todayItems.size, 
+                titleSize = 20.sp, 
+                bodySize = 13.sp,
+                isPremium = isPremium
+            )
         }
 
         VerticalDivider(
@@ -453,41 +641,69 @@ fun HomeScreenMediumContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Remindly",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2D6A4F),
-                    fontSize = 20.sp
-                )
-                IconButton(onClick = { /* Search */ }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Remindly",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2D6A4F),
+                        fontSize = 20.sp
+                    )
+                    if (isPremium) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = Color(0xFFD4AF37),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "Pro",
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                IconButton(onClick = onSearchClick) {
                     Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black, modifier = Modifier.size(20.dp))
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            LargeSearchBar(
-                text = state.searchQuery,
-                onValueChange = onSearchQueryChange
-            )
+            LargeSearchBar(onClick = onSearchClick)
 
             Spacer(modifier = Modifier.height(24.dp))
 
             SectionHeader("TODAY", fontSize = 10.sp)
             if (state.todayItems.isNotEmpty()) {
-                state.todayItems.forEach { item ->
-                    TaskItem(
-                        title = item.title,
-                        time = item.eventDate ?: "Today",
-                        icon = Icons.Default.AccessTime,
-                        iconBgColor = Color(0xFFEAF2EE),
-                        tag = "Today",
-                        tagColor = Color(0xFF2D6A4F),
-                        tagTextColor = Color.White,
-                        titleFontSize = 14.sp,
-                        onClick = { onNavigateToItem(item.id) }
-                    )
+                state.todayItems.take(2).forEach { item ->
+                    val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
+                        ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
+                        ?: "Today"
+                    
+                    if (isPremium) {
+                        ProTaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            summary = item.summary,
+                            tag = "Today",
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    } else {
+                        TaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            icon = Icons.Default.AccessTime,
+                            iconBgColor = Color(0xFFEAF2EE),
+                            tag = "Today",
+                            tagColor = Color(0xFF2D6A4F),
+                            tagTextColor = Color.White,
+                            titleFontSize = 14.sp,
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
             } else {
@@ -498,7 +714,7 @@ fun HomeScreenMediumContent(
 
             SectionHeader("LAST ANALYSED", fontSize = 10.sp)
             if (state.lastAnalysed.isNotEmpty()) {
-                AnalysedSectionMedium(state.lastAnalysed.take(3), onNavigateToItem = onNavigateToItem)
+                AnalysedSectionMedium(state.lastAnalysed.take(3), isPremium = isPremium, onNavigateToItem = onNavigateToItem)
             } else {
                 EmptySectionPlaceholder("No recent captures.")
             }
@@ -509,12 +725,21 @@ fun HomeScreenMediumContent(
             if (state.upcomingItems.isNotEmpty()) {
                 state.upcomingItems.take(3).forEach { item ->
                     val deadline = item.deadline
-                    val daysLeft = if (deadline != null) ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) else 0
+                    val daysLeft = if (deadline != null) {
+                        try {
+                            ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                        } catch (e: Exception) { 0 }
+                    } else 0
                     val icon = SourceIconProvider.getIconForSource(item.source)
                     UpcomingTaskItem(
                         title = item.title,
                         subtitle = item.organization ?: item.source ?: "",
-                        tag = "$daysLeft days left",
+                        tag = when {
+                            daysLeft == 0L -> "Today"
+                            daysLeft == 1L -> "1 day left"
+                            daysLeft < 0 -> "Overdue"
+                            else -> "$daysLeft days left"
+                        },
                         iconRes = (icon as? SourceIcon.Resource)?.resId,
                         icon = (icon as? SourceIcon.Vector)?.imageVector,
                         titleSize = 14.sp,
@@ -532,22 +757,150 @@ fun HomeScreenMediumContent(
 }
 
 @Composable
-fun GreetingSection(userName: String, attentionCount: Int, titleSize: TextUnit = 22.sp, bodySize: TextUnit = 14.sp, titleColor: Color = Color.Black) {
+fun GreetingSection(
+    userName: String, 
+    attentionCount: Int, 
+    titleSize: TextUnit = 22.sp, 
+    bodySize: TextUnit = 14.sp, 
+    titleColor: Color = Color.Black,
+    isPremium: Boolean = false
+) {
+    val hour = LocalTime.now().hour
+    val greeting = when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Good night"
+    }
+    val firstName = remember(userName) { userName.substringBefore(" ") }
     Column {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            "Good morning, $userName",
+            "$greeting, $firstName",
             style = MaterialTheme.typography.headlineSmall.copy(fontSize = titleSize),
             fontWeight = FontWeight.ExtraBold,
             color = titleColor
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            "You have $attentionCount things needing attention today.",
+            if (isPremium) "You have $attentionCount opportunities that need attention this week." 
+            else "You have $attentionCount things needing attention today.",
             style = MaterialTheme.typography.bodyMedium.copy(fontSize = bodySize),
             color = Color.Gray,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+@Composable
+fun ProTaskItem(
+    title: String,
+    time: String,
+    summary: String?,
+    tag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFF9FAF9),
+        border = BorderStroke(1.dp, Color(0xFFEEEEEE))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFEAF2EE)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (title.lowercase().contains("scholarship")) Icons.Default.WarningAmber else Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = if (title.lowercase().contains("scholarship")) Color(0xFFC0392B) else Color(0xFF2D6A4F),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color.Black
+                    )
+                    Text(
+                        time,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (time.lowercase().contains("tomorrow")) Color(0xFFD35400) else Color.Gray
+                    )
+                }
+                
+                Surface(
+                    color = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color(0xFFF0F0F0))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            tag,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
+            
+            if (summary != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color(0xFF2D6A4F),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6B7C6E),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    }
+                    
+                    // Quick Sync Button
+                    IconButton(
+                        onClick = onClick, // Navigates to details where sync is prominent
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarToday,
+                            contentDescription = "Sync",
+                            tint = Color(0xFF4285F4),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -559,7 +912,8 @@ fun CalendarStrip(items: List<Item>) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        color = Color(0xFFF9FAF9)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
         Row(
             modifier = Modifier
@@ -582,13 +936,13 @@ fun CalendarStrip(items: List<Item>) {
                     modifier = Modifier
                         .width(42.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(if (isSelected) Color(0xFF2D6A4F) else Color.Transparent)
+                        .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
                         .padding(vertical = 10.dp)
                 ) {
                     Text(
                         dayName,
                         fontSize = 11.sp,
-                        color = if (isSelected) Color.White else Color.Gray,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -596,7 +950,7 @@ fun CalendarStrip(items: List<Item>) {
                         dayOfMonth,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isSelected) Color.White else Color.Black
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Box(
@@ -604,8 +958,8 @@ fun CalendarStrip(items: List<Item>) {
                             .size(3.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isSelected) Color.White 
-                                else if (hasItemsOnDay) Color(0xFF2D6A4F) 
+                                if (isSelected) MaterialTheme.colorScheme.onPrimary 
+                                else if (hasItemsOnDay) MaterialTheme.colorScheme.primary 
                                 else Color.Transparent
                             )
                     )
@@ -793,7 +1147,7 @@ fun UpcomingTaskItem(
 }
 
 @Composable
-fun AnalysedSection(items: List<Item>, onNavigateToItem: (String) -> Unit = {}) {
+fun AnalysedSection(items: List<Item>, isPremium: Boolean = false, onNavigateToItem: (String) -> Unit = {}) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(end = 20.dp)
@@ -804,10 +1158,23 @@ fun AnalysedSection(items: List<Item>, onNavigateToItem: (String) -> Unit = {}) 
                 modifier = Modifier.width(180.dp),
                 title = item.title,
                 category = item.category ?: "Capture",
-                timeAgo = if (item.status == "PENDING") "Processing..." else "Analyzed ${DateUtils.getTimeAgo(item.createdAt)}",
+                timeAgo = when (item.status) {
+                    "PENDING" -> "Processing..."
+                    "RETRYING" -> "Retrying soon..."
+                    "FAILED" -> "Failed to process"
+                    else -> {
+                        val analyzedAt = item.metadata?.get("analyzed_at")
+                        if (analyzedAt != null) {
+                            "Analyzed ${DateUtils.getTimeAgo(analyzedAt)}"
+                        } else {
+                            "Captured ${DateUtils.getTimeAgo(item.createdAt)}"
+                        }
+                    }
+                },
                 status = item.status,
                 iconRes = (icon as? SourceIcon.Resource)?.resId,
                 icon = (icon as? SourceIcon.Vector)?.imageVector,
+                isPremium = isPremium,
                 onClick = { onNavigateToItem(item.id) }
             )
         }
@@ -815,7 +1182,7 @@ fun AnalysedSection(items: List<Item>, onNavigateToItem: (String) -> Unit = {}) 
 }
 
 @Composable
-fun AnalysedSectionLarge(items: List<Item>, onNavigateToItem: (String) -> Unit = {}) {
+fun AnalysedSectionLarge(items: List<Item>, isPremium: Boolean = false, onNavigateToItem: (String) -> Unit = {}) {
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         items.take(3).forEach { item ->
             val icon = SourceIconProvider.getIconForSource(item.source)
@@ -823,14 +1190,20 @@ fun AnalysedSectionLarge(items: List<Item>, onNavigateToItem: (String) -> Unit =
                 modifier = Modifier.weight(1f),
                 title = item.title,
                 category = item.category ?: "Capture",
-                timeAgo = if (item.status == "PENDING") "Processing..." else DateUtils.getTimeAgo(item.createdAt),
+                timeAgo = when (item.status) {
+                    "PENDING" -> "Processing..."
+                    "RETRYING" -> "Retrying soon..."
+                    "FAILED" -> "Failed"
+                    else -> {
+                        val analyzedAt = item.metadata?.get("analyzed_at")
+                        if (analyzedAt != null) DateUtils.getTimeAgo(analyzedAt) else DateUtils.getTimeAgo(item.createdAt)
+                    }
+                },
                 status = item.status,
                 iconRes = (icon as? SourceIcon.Resource)?.resId,
                 icon = (icon as? SourceIcon.Vector)?.imageVector,
-                titleFontSize = 12.sp,
-                titleColor = Color(0xFF111111),
-                timeColor = Color(0xFF6B7C6E),
-                badgeColor = Color(0xFF2D6A4F),
+                padding = 12.dp,
+                isPremium = isPremium,
                 onClick = { onNavigateToItem(item.id) }
             )
         }
@@ -838,7 +1211,7 @@ fun AnalysedSectionLarge(items: List<Item>, onNavigateToItem: (String) -> Unit =
 }
 
 @Composable
-fun AnalysedSectionMedium(items: List<Item>, onNavigateToItem: (String) -> Unit = {}) {
+fun AnalysedSectionMedium(items: List<Item>, isPremium: Boolean = false, onNavigateToItem: (String) -> Unit = {}) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(end = 12.dp)
@@ -849,12 +1222,20 @@ fun AnalysedSectionMedium(items: List<Item>, onNavigateToItem: (String) -> Unit 
                 modifier = Modifier.width(160.dp),
                 title = item.title,
                 category = item.category ?: "Capture",
-                timeAgo = if (item.status == "PENDING") "Processing..." else DateUtils.getTimeAgo(item.createdAt),
+                timeAgo = when (item.status) {
+                    "PENDING" -> "Processing..."
+                    "RETRYING" -> "Retrying soon..."
+                    "FAILED" -> "Failed"
+                    else -> {
+                        val analyzedAt = item.metadata?.get("analyzed_at")
+                        if (analyzedAt != null) DateUtils.getTimeAgo(analyzedAt) else DateUtils.getTimeAgo(item.createdAt)
+                    }
+                },
                 status = item.status,
                 iconRes = (icon as? SourceIcon.Resource)?.resId,
                 icon = (icon as? SourceIcon.Vector)?.imageVector,
-                titleFontSize = 12.sp,
                 padding = 10.dp,
+                isPremium = isPremium,
                 onClick = { onNavigateToItem(item.id) }
             )
         }
@@ -870,19 +1251,28 @@ fun AnalysedCard(
     status: String = "DONE",
     iconRes: Int? = null,
     icon: ImageVector? = null,
-    titleFontSize: TextUnit = 13.sp,
-    titleColor: Color = Color.Black,
-    timeColor: Color = Color.Gray,
-    badgeColor: Color = Color(0xFF2D6A4F),
     padding: Dp = 12.dp,
+    badgeColor: Color = Color(0xFF2D6A4F),
+    isPremium: Boolean = false,
     onClick: () -> Unit = {}
 ) {
-    val isAnalyzing = status == "PENDING"
+    val (badgeText, badgeBgColor, badgeTextColor) = when (status) {
+        "PENDING" -> Triple("Analyzing...", Color(0xFFFFF7E6), Color(0xFFD48806))
+        "FAILED" -> Triple("Failed", Color(0xFFFFF1F0), Color(0xFFCF1322))
+        "RETRYING" -> Triple("Retrying...", Color(0xFFF0F5FF), Color(0xFF1D39C4))
+        "READY", "DONE", "ACTIVE" -> Triple("Analysed", Color(0xFFEAF2EE), if (isPremium) Color(0xFF2D6A4F) else badgeColor)
+        else -> Triple("Captured", Color(0xFFF0F0F0), Color.Gray)
+    }
+
+    val categoryText = if (status == "PENDING" || status == "RETRYING") "Processing" else category
+    val categoryBgColor = if (status == "PENDING" || status == "RETRYING" || status == "FAILED") Color(0xFFF0F0F0) else Color(0xFF2D6A4F)
+    val categoryTextColor = if (status == "PENDING" || status == "RETRYING" || status == "FAILED") Color.Gray else Color.White
     
     Surface(
         modifier = modifier.clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
-        color = Color(0xFFF9FAF9)
+        shape = RoundedCornerShape(if (isPremium) 24.dp else 20.dp),
+        color = Color(0xFFF9FAF9),
+        border = BorderStroke(1.dp, if (isPremium) Color(0xFFD4AF37).copy(alpha = 0.3f) else Color(0xFFF0F0F0))
     ) {
         Column(modifier = Modifier.padding(padding)) {
             Row(
@@ -892,7 +1282,7 @@ fun AnalysedCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(Color.White),
                     contentAlignment = Alignment.Center
@@ -901,58 +1291,58 @@ fun AnalysedCard(
                         Icon(
                             painter = painterResource(id = iconRes),
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(20.dp),
                             tint = Color(0xFF2D6A4F)
                         )
                     } else if (icon != null) {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(20.dp),
                             tint = Color(0xFF2D6A4F)
                         )
                     }
                 }
                 
                 Surface(
-                    color = if (isAnalyzing) Color(0xFFFFF7E6) else Color(0xFFEAF2EE),
+                    color = badgeBgColor,
                     shape = CircleShape
                 ) {
                     Text(
-                        if (isAnalyzing) "Analyzing..." else "Analysed",
+                        badgeText,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isAnalyzing) Color(0xFFD48806) else badgeColor
+                        color = badgeTextColor
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             
             Text(
                 title,
                 fontWeight = FontWeight.Bold,
-                fontSize = titleFontSize,
+                fontSize = 15.sp,
                 maxLines = 2,
                 minLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = titleColor,
-                lineHeight = (titleFontSize.value + 3).sp
+                color = Color.Black,
+                lineHeight = 18.sp
             )
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             
             Surface(
-                color = if (isAnalyzing) Color(0xFFF0F0F0) else Color(0xFF2D6A4F),
-                shape = CircleShape
+                color = if (isPremium) Color(0xFF2D6A4F) else categoryBgColor,
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    if (isAnalyzing) "Processing" else category,
+                    categoryText,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isAnalyzing) Color.Gray else Color.White
+                    color = if (isPremium) Color.White else categoryTextColor
                 )
             }
             
@@ -961,7 +1351,7 @@ fun AnalysedCard(
             Text(
                 timeAgo,
                 style = MaterialTheme.typography.bodySmall,
-                color = timeColor,
+                color = Color.Gray,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -970,12 +1360,26 @@ fun AnalysedCard(
 }
 
 @Composable
-fun LargeSearchBar(text: String, onValueChange: (String) -> Unit) {
-    SearchField(
-        placeholder = "Search captures...",
-        text = text,
-        onValueChange = onValueChange
-    )
+fun LargeSearchBar(onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFF4F6F4)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Search captures...", color = Color.Gray)
+        }
+    }
 }
 
 @Composable
@@ -1161,10 +1565,105 @@ fun HomeLargeScreenPreview() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchSheet(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    searchResults: List<Item>,
+    onNavigateToItem: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    
+    val focusRequester = remember { FocusRequester() }
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) },
+        modifier = Modifier.fillMaxHeight(0.9f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
+            Text(
+                "Search Captures",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            SearchField(
+                placeholder = "Type to search...",
+                text = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier
+                    .padding(bottom = 8.dp)
+                    .focusRequester(focusRequester)
+            )
+            
+            LaunchedEffect(Unit) {
+                focusRequester.requestFocus()
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            if (searchQuery.isBlank()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Looking for something?", color = Color.Gray)
+                    }
+                }
+            } else if (searchResults.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("No results for \"$searchQuery\"", color = Color.Gray)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
+                    items(searchResults) { item ->
+                        val icon = SourceIconProvider.getIconForSource(item.source)
+                        TaskItem(
+                            title = item.title,
+                            time = item.deadline?.let { DateUtils.formatDisplayDate(it) } ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) } ?: "No date set",
+                            icon = (icon as? SourceIcon.Vector)?.imageVector ?: Icons.Default.Description,
+                            iconBgColor = Color(0xFFEAF2EE),
+                            tag = item.category,
+                            tagColor = Color(0xFFFEF5E7),
+                            tagTextColor = Color(0xFFD35400),
+                            onClick = { 
+                                onDismiss()
+                                onNavigateToItem(item.id) 
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 private val PreviewHomeUiState = HomeUiState.Success(
     todayItems = listOf(
         Item(
             id = "1",
+            userId = "sample",
             title = "Check emails",
             summary = null,
             category = null,
@@ -1175,6 +1674,7 @@ private val PreviewHomeUiState = HomeUiState.Success(
         ),
         Item(
             id = "2",
+            userId = "sample",
             title = "Meeting with team",
             summary = null,
             category = null,
@@ -1188,6 +1688,7 @@ private val PreviewHomeUiState = HomeUiState.Success(
     lastAnalysed = listOf(
         Item(
             id = "3",
+            userId = "sample",
             title = "Project Proposal",
             summary = "Analysis of the new project",
             category = "Project",
@@ -1201,6 +1702,7 @@ private val PreviewHomeUiState = HomeUiState.Success(
     upcomingItems = listOf(
         Item(
             id = "4",
+            userId = "sample",
             title = "Buy groceries",
             summary = null,
             category = null,

@@ -63,7 +63,8 @@ fun InboxScreen(
         onCategorySelected = { categoryId ->
             viewModel.selectCategory(categoryId)
             if (windowWidthSizeClass == WindowWidthSizeClass.Compact) {
-                onNavigateToCategory(categoryId)
+                val encodedCategory = java.net.URLEncoder.encode(categoryId, "UTF-8")
+                onNavigateToCategory(encodedCategory)
             }
         },
         onDeleteCategories = { categoryIds ->
@@ -101,7 +102,11 @@ fun InboxScreenContent(
     var selectedCategories by remember { mutableStateOf(setOf<String>()) }
     val isSelectionMode = selectedCategories.isNotEmpty()
 
-    Row(modifier = Modifier.fillMaxSize().background(Color.White)) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
         Scaffold(
             topBar = {
                 if (isSelectionMode) {
@@ -785,12 +790,12 @@ fun InboxLargeScreenPreview() {
                     InboxCategory("Other", "Team standup notes", 9, iconType = "category")
                 ),
                 items = listOf(
-                    Item(id = "1", title = "Spotify Software Engineer — London", summary = null, category = "Jobs", deadline = futureDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
-                    Item(id = "2", title = "Google Summer Internship 2025", summary = null, category = "Jobs", deadline = soonDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
-                    Item(id = "3", title = "Meta University Program 2025", summary = null, category = "Jobs", deadline = upcomingDate, eventDate = null, source = "Gmail", createdAt = "", status = "Active"),
-                    Item(id = "4", title = "Amazon SDE Internship", summary = null, category = "Jobs", deadline = upcomingDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
-                    Item(id = "5", title = "React Native Developer — Remote", summary = null, category = "Jobs", deadline = null, eventDate = null, source = "WhatsApp", createdAt = "", status = "Active"),
-                    Item(id = "6", title = "Junior iOS Developer — Berlin", summary = null, category = "Jobs", deadline = null, eventDate = null, source = "Gmail", createdAt = "", status = "Active")
+                    Item(id = "1", userId = "sample", title = "Spotify Software Engineer — London", summary = null, category = "Jobs", deadline = futureDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
+                    Item(id = "2", userId = "sample", title = "Google Summer Internship 2025", summary = null, category = "Jobs", deadline = soonDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
+                    Item(id = "3", userId = "sample", title = "Meta University Program 2025", summary = null, category = "Jobs", deadline = upcomingDate, eventDate = null, source = "Gmail", createdAt = "", status = "Active"),
+                    Item(id = "4", userId = "sample", title = "Amazon SDE Internship", summary = null, category = "Jobs", deadline = upcomingDate, eventDate = null, source = "LinkedIn", createdAt = "", status = "Active"),
+                    Item(id = "5", userId = "sample", title = "React Native Developer — Remote", summary = null, category = "Jobs", deadline = null, eventDate = null, source = "WhatsApp", createdAt = "", status = "Active"),
+                    Item(id = "6", userId = "sample", title = "Junior iOS Developer — Berlin", summary = null, category = "Jobs", deadline = null, eventDate = null, source = "Gmail", createdAt = "", status = "Active")
                 ),
                 selectedCategoryId = "Jobs"
             ),

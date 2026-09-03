@@ -5,10 +5,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import com.victorkirui.module_features.reminder.BriefingWorker
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
@@ -24,7 +27,7 @@ import com.victorkirui.core.notification.NotificationHelper
 import com.victorkirui.core.repository.ReminderSettingsRepository
 import com.victorkirui.module_features.capturing.CapturingDialog
 import com.victorkirui.module_features.capturing.CapturingViewModel
-import com.victorkirui.module_features.reminder.BriefingWorker
+import com.victorkirui.module_features.reminder.ReminderScheduler
 import com.victorkirui.remindly.nav.RemindlyNavigation
 import com.victorkirui.core.ui.theme.RemindlyTheme
 import kotlinx.coroutines.MainScope
@@ -38,8 +41,12 @@ class MainActivity : ComponentActivity() {
     private val shareIntentParser = ShareIntentHandler()
     private val capturingViewModel: CapturingViewModel by viewModel()
     private val settingsRepository: ReminderSettingsRepository by inject()
+    private val reminderScheduler: ReminderScheduler by inject()
     
     private var pendingItemId by mutableStateOf<String?>(null)
+    private var pendingOpenCapture by mutableStateOf(false)
+    private var pendingSelectedDate by mutableStateOf<String?>(null)
+    private var pendingOpenPaywall by mutableStateOf(false)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -64,40 +71,51 @@ class MainActivity : ComponentActivity() {
                 } catch (e: Exception) {
                     LocalTime.of(8, 0)
                 }
-                BriefingWorker.schedule(this@MainActivity, preferredTime)
+                reminderScheduler.scheduleDailyBriefing(preferredTime)
+                try {
+                    BriefingWorker.cancel(applicationContext)
+                } catch (_: Exception) {}
             }
         }
 
         setContent {
-            val themeRepository: com.victorkirui.core.repository.ThemeRepository = org.koin.compose.koinInject()
-            val isDarkThemePref by themeRepository.isDarkTheme.collectAsState(initial = null)
-            val useDarkTheme = isDarkThemePref ?: androidx.compose.foundation.isSystemInDarkTheme()
-
-            RemindlyTheme(darkTheme = useDarkTheme) {
+            RemindlyTheme {
                 val uiState by capturingViewModel.uiState.collectAsState()
                 val windowSizeClass = calculateWindowSizeClass(this)
                 
                 Box(modifier = Modifier.fillMaxSize()) {
                     val source = try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                            referrer?.host ?: "Unknown"
+                        val ref = referrer?.host
+                        if (ref != null) {
+                            ref
                         } else {
-                            "Unknown"
+                            // Try to get from Intent extras if referrer is missing
+                            val extraRef = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                intent?.getParcelableExtra(Intent.EXTRA_REFERRER, Uri::class.java)
+                            } else {
+                                @Suppress("DEPRECATION")
+                                intent?.getParcelableExtra(Intent.EXTRA_REFERRER)
+                            }
+                            extraRef?.host
+                                ?: intent?.getStringExtra(Intent.EXTRA_REFERRER_NAME)
+                                ?: "Unknown"
                         }
                     } catch (e: Exception) { "Unknown" }
 
                     RemindlyNavigation(
                         shareContent = shareIntentParser.handleIntent(intent, source),
                         initialItemId = pendingItemId,
-                        windowWidthSizeClass = windowSizeClass.widthSizeClass
-                    )
-                    
-                    // Reset pendingItemId after passing it to navigation
-                    androidx.compose.runtime.LaunchedEffect(pendingItemId) {
-                        if (pendingItemId != null) {
-                            pendingItemId = null
+                        initialOpenCapture = pendingOpenCapture,
+                        initialSelectedDate = pendingSelectedDate,
+                        initialOpenPaywall = pendingOpenPaywall,
+                        windowWidthSizeClass = windowSizeClass.widthSizeClass,
+                        onIntentHandled = {
+                            if (pendingItemId != null) pendingItemId = null
+                            if (pendingOpenCapture) pendingOpenCapture = false
+                            if (pendingSelectedDate != null) pendingSelectedDate = null
+                            if (pendingOpenPaywall) pendingOpenPaywall = false
                         }
-                    }
+                    )
                     
                     CapturingDialog(
                         uiState = uiState,
@@ -120,6 +138,49 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(NotificationHelper.EXTRA_ITEM_ID)?.let { itemId ->
             pendingItemId = itemId
         }
+        val extras = intent?.extras
+        if (extras != null) {
+            val directItemId = extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_ITEM_ID)
+                ?: extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_ITEM_ID.name)
+            if (!directItemId.isNullOrEmpty()) {
+                pendingItemId = directItemId
+            }
+
+            val openCapture = extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_OPEN_CAPTURE, false) ||
+                              extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_OPEN_CAPTURE.name, false)
+            if (openCapture) {
+                pendingOpenCapture = true
+            }
+
+            val openPaywall = extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_OPEN_PAYWALL, false) ||
+                              extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_OPEN_PAYWALL.name, false)
+            if (openPaywall) {
+                pendingOpenPaywall = true
+            }
+
+            val dateStr = extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_SELECTED_DATE)
+                ?: extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_SELECTED_DATE.name)
+            if (!dateStr.isNullOrEmpty()) {
+                pendingSelectedDate = dateStr
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkNotificationPermission()
+        checkExactAlarmPermission()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        MainScope().launch {
+            try {
+                com.victorkirui.remindly.widget.WidgetUpdater.updateWidgets(applicationContext)
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Failed to update widgets onStop: ${e.message}")
+            }
+        }
     }
 
     private fun checkNotificationPermission() {
@@ -130,6 +191,26 @@ class MainActivity : ComponentActivity() {
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private fun checkExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            if (!alarmManager.canScheduleExactAlarms()) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    // Fallback to app details
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                    startActivity(intent)
+                }
             }
         }
     }

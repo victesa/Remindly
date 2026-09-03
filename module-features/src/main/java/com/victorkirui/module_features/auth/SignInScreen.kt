@@ -58,6 +58,7 @@ fun SignInScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     val webClientId = stringResource(id = R.string.default_web_client_id)
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -91,19 +92,29 @@ fun SignInScreen(
         if (uiState is SignInUiState.Success) {
             onSignInSuccess()
             viewModel.resetState()
+        } else if (uiState is SignInUiState.ResetEmailSent) {
+            snackbarHostState.showSnackbar("Password reset email sent. Please check your inbox.")
+            viewModel.resetState()
         }
     }
 
-    SignInScreenContent(
-        uiState = uiState,
-        windowWidthSizeClass = windowWidthSizeClass,
-        onSignIn = { email, password ->
-            viewModel.signIn(email, password)
-        },
-        onGoogleSignIn = { launchGoogleSignIn() },
-        onNavigateToSignUp = onNavigateToSignUp,
-        onForgotPassword = onForgotPassword
-    )
+    Scaffold(
+        modifier = Modifier.statusBarsPadding(),
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        SignInScreenContent(
+            uiState = uiState,
+            windowWidthSizeClass = windowWidthSizeClass,
+            onSignIn = { email, password ->
+                viewModel.signIn(email, password)
+            },
+            onGoogleSignIn = { launchGoogleSignIn() },
+            onNavigateToSignUp = onNavigateToSignUp,
+            onForgotPassword = onForgotPassword,
+            onResetPassword = { email -> viewModel.resetPassword(email) },
+            modifier = Modifier.padding(padding)
+        )
+    }
 
     if (uiState is SignInUiState.Loading) {
         AuthLoadingDialog()
@@ -117,12 +128,14 @@ fun SignInScreenContent(
     onSignIn: (String, String) -> Unit,
     onGoogleSignIn: () -> Unit,
     onNavigateToSignUp: () -> Unit,
-    onForgotPassword: () -> Unit
+    onForgotPassword: () -> Unit,
+    onResetPassword: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val isCompact = windowWidthSizeClass == WindowWidthSizeClass.Compact
     val isExpanded = windowWidthSizeClass == WindowWidthSizeClass.Expanded
 
-    Row(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = modifier.fillMaxSize()) {
         if (!isCompact) {
             SignInBrandingPanel(
                 windowWidthSizeClass = windowWidthSizeClass,
@@ -144,6 +157,7 @@ fun SignInScreenContent(
                 onGoogleSignIn = onGoogleSignIn,
                 onNavigateToSignUp = onNavigateToSignUp,
                 onForgotPassword = onForgotPassword,
+                onResetPassword = onResetPassword,
                 modifier = Modifier
                     .widthIn(max = if (isExpanded) 600.dp else 500.dp)
                     .fillMaxWidth()
@@ -265,6 +279,7 @@ private fun SignInForm(
     onGoogleSignIn: () -> Unit,
     onNavigateToSignUp: () -> Unit,
     onForgotPassword: () -> Unit,
+    onResetPassword: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isExpanded = windowWidthSizeClass == WindowWidthSizeClass.Expanded
@@ -394,7 +409,7 @@ private fun SignInForm(
             "Forgot password?",
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onForgotPassword() },
+                .clickable { onResetPassword(email) },
             textAlign = TextAlign.End,
             color = Color(0xFF2D6A4F),
             style = if (isExpanded) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodySmall,
@@ -467,7 +482,8 @@ fun SignInScreenExpandedPreview() {
             onSignIn = { _, _ -> },
             onGoogleSignIn = {},
             onNavigateToSignUp = {},
-            onForgotPassword = {}
+            onForgotPassword = {},
+            onResetPassword = {}
         )
     }
 }
@@ -482,7 +498,8 @@ fun SignInScreenMediumPreview() {
             onSignIn = { _, _ -> },
             onGoogleSignIn = {},
             onNavigateToSignUp = {},
-            onForgotPassword = {}
+            onForgotPassword = {},
+            onResetPassword = {}
         )
     }
 }
@@ -497,7 +514,8 @@ fun SignInScreenCompactPreview() {
             onSignIn = { _, _ -> },
             onGoogleSignIn = {},
             onNavigateToSignUp = {},
-            onForgotPassword = {}
+            onForgotPassword = {},
+            onResetPassword = {}
         )
     }
 }

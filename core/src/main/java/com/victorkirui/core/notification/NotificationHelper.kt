@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.victorkirui.core.R
 
 class NotificationHelper(private val context: Context) {
     private val channelId = "capture_channel"
@@ -42,7 +43,7 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
-    fun showNotification(title: String, message: String, itemId: String? = null) {
+    fun showNotification(title: String, message: String, itemId: String? = null, notificationId: Int? = null) {
         Log.d("NotificationHelper", "Request to show notification: $title - $message, itemId: $itemId")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(
@@ -71,7 +72,7 @@ class NotificationHelper(private val context: Context) {
         )
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(context.applicationInfo.icon)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -88,8 +89,11 @@ class NotificationHelper(private val context: Context) {
             )
         }
 
+        // Use a unique ID to prevent notifications from overwriting each other
+        val finalId = notificationId ?: (itemId?.hashCode()?.plus(title.hashCode()) ?: System.currentTimeMillis().toInt())
+
         with(NotificationManagerCompat.from(context)) {
-            notify(itemId?.hashCode() ?: System.currentTimeMillis().toInt(), builder.build())
+            notify(finalId, builder.build())
         }
     }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_bg_white">#FFFFFF</color>
+    <color name="widget_green">#2D6A4F</color>
+    <color name="widget_dark_text">#111111</color>
+    <color name="widget_subtext_slate">#3A506B</color>
+    <color name="widget_gray_label">#6B7C6E</color>
+    <color name="widget_red_urgent">#C0392B</color>
+    <color name="widget_red_light">#FFF5F5</color>
+    <color name="widget_green_light">#EAF2EE</color>
+</resources>

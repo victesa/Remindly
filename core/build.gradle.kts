@@ -20,7 +20,12 @@ android {
             localProperties.load(localPropertiesFile.inputStream())
         }
         val webClientId = localProperties.getProperty("WEB_CLIENT_ID") ?: ""
+        val cfClientId = localProperties.getProperty("CF_ACCESS_CLIENT_ID") ?: ""
+        val cfClientSecret = localProperties.getProperty("CF_ACCESS_CLIENT_SECRET") ?: ""
+
         resValue("string", "default_web_client_id", webClientId)
+        buildConfigField("String", "CF_ACCESS_CLIENT_ID", "\"$cfClientId\"")
+        buildConfigField("String", "CF_ACCESS_CLIENT_SECRET", "\"$cfClientSecret\"")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -31,13 +36,17 @@ android {
     buildFeatures {
         compose = true
         resValues = true
+        buildConfig = true
     }
 }
 
 dependencies {
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:34.17.0"))
-    implementation("com.google.firebase:firebase-auth")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.auth)
+    implementation(libs.play.services.auth)
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(platform(libs.androidx.compose.bom))
@@ -52,5 +61,6 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     implementation(libs.koin.android)
-    implementation(project(":module-sources:local"))
+    implementation(libs.play.billing.ktx)
+    implementation(libs.androidx.glance.appwidget)
 }

@@ -19,61 +19,44 @@ class CaptureApiServiceImpl(
     private val api: CaptureApi,
     private val context: Context
 ) : CaptureApiService {
-    override suspend fun capture(request: CaptureRequest, mediaUri: Uri?): CaptureResponse {
-        return if (mediaUri != null) {
-            val file = getFileFromUri(mediaUri)
-            val extension = file.extension.lowercase()
-            
-            // 1. Try ContentResolver/Extension
-            var detectedMimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
-            
-            // 2. Fallback to sniffing if ambiguous
-            if (detectedMimeType == null || detectedMimeType == "application/octet-stream") {
-                detectedMimeType = sniffMimeType(file) ?: when (request.contentType) {
-                    "DOCUMENT" -> "application/pdf"
-                    "IMAGE" -> "image/jpeg"
-                    else -> detectedMimeType ?: "application/octet-stream"
-                }
-            }
-            
-            Log.e("CaptureApiService", "Uploading file: ${file.name}, detectedMimeType: $detectedMimeType")
-            
-            val mediaPart = MultipartBody.Part.createFormData(
-                "media",
-                file.name,
-                file.asRequestBody(detectedMimeType.toMediaTypeOrNull())
-            )
+    override suspend fun getQuota(): com.victorkirui.core.model.QuotaResponse {
+        return api.getQuota()
+    }
 
-            val partMap = mutableMapOf<String, RequestBody>()
-            val textMediaType = "text/plain".toMediaTypeOrNull()
-            partMap["itemId"] = request.itemId.toRequestBody(textMediaType)
-            partMap["contentType"] = request.contentType.toRequestBody(textMediaType)
-            partMap["capturedAt"] = request.capturedAt.toRequestBody(textMediaType)
-            partMap["mimeType"] = detectedMimeType.toRequestBody(textMediaType)
-            partMap["metadata"] = Gson().toJson(request.metadata).toRequestBody(textMediaType)
-            
-            request.extractedText?.let {
-                partMap["extractedText"] = it.toRequestBody(textMediaType)
-            }
+    override suspend fun getCaptures(): List<com.victorkirui.core.model.StoredReminderItem> {
+        val response = api.getItems()
+        val items = response.items ?: emptyList()
+        Log.d("CaptureApiService", "GET /v1/items response: success=${response.success}, userId=${response.userId}, tier=${response.userTier}, count=${response.count}, itemsSize=${items.size}")
+        return items
+    }
 
-            try {
-                val response = api.captureMultipartV2(
-                    parts = partMap,
-                    media = mediaPart
-                )
-                Log.e("CaptureApiService", "Response success: ${Gson().toJson(response)}")
-                response
-            } catch (e: retrofit2.HttpException) {
-                val errorBody = e.response()?.errorBody()?.string()
-                Log.e("CaptureApiService", "HTTP Error ${e.code()}: $errorBody")
-                throw e
-            } finally {
-                if (file.exists() && file.path.contains(context.cacheDir.path)) {
-                    file.delete()
-                }
-            }
-        } else {
-            api.captureJson(request)
+    override suspend fun updateItem(id: String, updates: Map<String, Any?>): Boolean {
+        return try {
+            api.updateItem(id, updates)
+            true
+        } catch (e: Exception) {
+            Log.e("CaptureApiService", "Failed to update item $id", e)
+            false
+        }
+    }
+
+    override suspend fun deleteItem(id: String): Boolean {
+        return try {
+            val response = api.deleteItem(id)
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("CaptureApiService", "Failed to delete item $id", e)
+            false
+        }
+    }
+
+    override suspend fun purgeAccount(): Boolean {
+        return try {
+            val response = api.purgeAccount()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("CaptureApiService", "Failed to purge account data", e)
+            false
         }
     }
 

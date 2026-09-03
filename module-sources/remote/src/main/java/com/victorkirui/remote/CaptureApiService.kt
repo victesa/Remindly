@@ -5,5 +5,9 @@ import com.victorkirui.core.model.CaptureResponse
 import android.net.Uri
 
 interface CaptureApiService {
-    suspend fun capture(request: CaptureRequest, mediaUri: Uri? = null): CaptureResponse
+    suspend fun getQuota(): com.victorkirui.core.model.QuotaResponse
+    suspend fun getCaptures(): List<com.victorkirui.core.model.StoredReminderItem>
+    suspend fun updateItem(id: String, updates: Map<String, Any?>): Boolean
+    suspend fun deleteItem(id: String): Boolean
+    suspend fun purgeAccount(): Boolean
 }

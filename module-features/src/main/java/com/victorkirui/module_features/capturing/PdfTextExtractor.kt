@@ -16,8 +16,8 @@ class PdfTextExtractor(private val context: Context) {
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-    suspend fun extractText(uri: Uri): String? {
-        Log.d("PdfTextExtractor", "Extracting text from PDF: $uri, scheme: ${uri.scheme}")
+    suspend fun extractText(uri: Uri, maxPages: Int = 5): String? {
+        Log.d("PdfTextExtractor", "Extracting text from PDF: $uri, scheme: ${uri.scheme}, maxPages: $maxPages")
         return try {
             val fileDescriptor = if (uri.scheme == "file") {
                 val path = uri.path ?: throw Exception("File path is null")
@@ -30,14 +30,19 @@ class PdfTextExtractor(private val context: Context) {
             } ?: throw Exception("File descriptor is null")
 
             val pdfRenderer = PdfRenderer(fileDescriptor)
-            Log.d("PdfTextExtractor", "PdfRenderer opened. Page count: ${pdfRenderer.pageCount}")
+            val pageCount = pdfRenderer.pageCount
+            Log.d("PdfTextExtractor", "PdfRenderer opened. Page count: $pageCount")
+            
+            if (pageCount > maxPages) {
+                pdfRenderer.close()
+                fileDescriptor.close()
+                throw IllegalArgumentException("This PDF has $pageCount pages, but your current plan only supports up to $maxPages pages.")
+            }
             
             val stringBuilder = StringBuilder()
+            val actualPageCount = pageCount
             
-            // Limit to first 5 pages to avoid excessive processing
-            val pageCount = Math.min(pdfRenderer.pageCount, 5)
-            
-            for (i in 0 until pageCount) {
+            for (i in 0 until actualPageCount) {
                 val page = pdfRenderer.openPage(i)
                 
                 // Increase scale for better OCR accuracy
@@ -60,6 +65,9 @@ class PdfTextExtractor(private val context: Context) {
             val extractedText = stringBuilder.toString().trim()
             Log.d("PdfTextExtractor", "Extracted ${extractedText.length} characters")
             extractedText.ifEmpty { null }
+        } catch (e: IllegalArgumentException) {
+            // Re-throw plan limit exceptions so the UseCase can handle them (e.g. show upgrade dialog)
+            throw e
         } catch (e: Exception) {
             Log.e("PdfTextExtractor", "Failed to extract text from PDF", e)
             null

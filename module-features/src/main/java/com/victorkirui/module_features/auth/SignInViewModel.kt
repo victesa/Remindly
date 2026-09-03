@@ -43,6 +43,23 @@ class SignInViewModel(
         }
     }
 
+    fun resetPassword(email: String) {
+        if (email.isBlank()) {
+            _uiState.value = SignInUiState.Error("Please enter your email to reset password")
+            return
+        }
+
+        _uiState.value = SignInUiState.Loading
+        viewModelScope.launch {
+            val result = authRepository.sendPasswordResetEmail(email)
+            if (result.isSuccess) {
+                _uiState.value = SignInUiState.ResetEmailSent
+            } else {
+                _uiState.value = SignInUiState.Error(result.exceptionOrNull()?.message ?: "Failed to send reset email")
+            }
+        }
+    }
+
     fun resetState() {
         _uiState.value = SignInUiState.Idle
     }
@@ -52,5 +69,6 @@ sealed class SignInUiState {
     object Idle : SignInUiState()
     object Loading : SignInUiState()
     object Success : SignInUiState()
+    object ResetEmailSent : SignInUiState()
     data class Error(val message: String) : SignInUiState()
 }

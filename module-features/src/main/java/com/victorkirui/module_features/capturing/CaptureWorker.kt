@@ -52,6 +52,14 @@ class CaptureWorker(
                 notificationHelper.showNotification("Capture Overdue", "The item was not saved because it is in the past.")
                 Result.success()
             }
+            is CaptureResult.UpgradeRequired -> {
+                notificationHelper.showNotification("Upgrade Required", result.message)
+                Result.success()
+            }
+            is CaptureResult.Duplicate -> {
+                notificationHelper.showNotification("Capture Exists", "This item was captured before.")
+                Result.success()
+            }
         }
     }
 

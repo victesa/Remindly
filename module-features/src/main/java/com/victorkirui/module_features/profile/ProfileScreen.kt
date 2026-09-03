@@ -18,25 +18,72 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
 import com.victorkirui.core.ui.theme.*
+import com.victorkirui.core.repository.SubscriptionTier
+import com.victorkirui.module_features.subscription.SubscriptionPaywallSheet
 import com.victorkirui.core.R
 import org.koin.androidx.compose.koinViewModel
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private fun formatDisplayTime(timeStr: String): String {
+    return try {
+        val time = LocalTime.parse(timeStr)
+        time.format(DateTimeFormatter.ofPattern("hh:mm a", Locale.US))
+    } catch (e: Exception) {
+        timeStr
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     windowWidthSizeClass: WindowWidthSizeClass,
     onSignOut: () -> Unit = {},
+    onShowWalkthrough: () -> Unit = {},
     viewModel: ProfileViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    var showDeletionDialog by remember { mutableStateOf(false) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(viewModel.deletionResult) {
+        viewModel.deletionResult.collect { result ->
+            if (result.isSuccess) {
+                onSignOut() // Redirect to auth on successful deletion
+            } else {
+                val errorMsg = result.exceptionOrNull()?.message ?: "Failed to delete account. Please try again."
+                android.widget.Toast.makeText(context, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     var showTimePicker by remember { mutableStateOf(false) }
+    var showLeadTimePicker by remember { mutableStateOf(false) }
+    var showSubscriptionPlans by remember { mutableStateOf(false) }
+    var showWidgetsGallery by remember { mutableStateOf(false) }
+
+    if (showLeadTimePicker) {
+        LeadTimePickerDialog(
+            currentHours = uiState.deadlineAlertLeadTimeHours,
+            onDismiss = { showLeadTimePicker = false },
+            onSelected = { hours ->
+                viewModel.setDeadlineAlertLeadTime(hours)
+                showLeadTimePicker = false
+            }
+        )
+    }
+
     val timePickerState = rememberTimePickerState(
         initialHour = uiState.preferredReminderTime.split(":")[0].toIntOrNull() ?: 8,
         initialMinute = uiState.preferredReminderTime.split(":")[1].take(2).toIntOrNull() ?: 0
@@ -46,29 +93,106 @@ fun ProfileScreen(
         TimePickerDialog(
             onDismissRequest = { showTimePicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    val hour = if (timePickerState.hour < 10) "0${timePickerState.hour}" else "${timePickerState.hour}"
-                    val minute = if (timePickerState.minute < 10) "0${timePickerState.minute}" else "${timePickerState.minute}"
-                    viewModel.updateReminderTime("$hour:$minute")
-                    showTimePicker = false
-                }) { Text("Confirm") }
+                Button(
+                    onClick = {
+                        val hour = if (timePickerState.hour < 10) "0${timePickerState.hour}" else "${timePickerState.hour}"
+                        val minute = if (timePickerState.minute < 10) "0${timePickerState.minute}" else "${timePickerState.minute}"
+                        viewModel.updateReminderTime("$hour:$minute")
+                        showTimePicker = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Confirm", fontWeight = FontWeight.Bold, color = Color.White) }
             },
             dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                TextButton(
+                    onClick = { showTimePicker = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2D6A4F))
+                ) { Text("Cancel", fontWeight = FontWeight.SemiBold) }
             }
         ) {
-            TimePicker(state = timePickerState)
+            TimePicker(
+                state = timePickerState,
+                colors = TimePickerDefaults.colors(
+                    clockDialColor = Color(0xFFEAF2EE),
+                    clockDialSelectedContentColor = Color.White,
+                    clockDialUnselectedContentColor = Color(0xFF2D6A4F),
+                    selectorColor = Color(0xFF2D6A4F),
+                    periodSelectorSelectedContainerColor = Color(0xFF2D6A4F),
+                    periodSelectorSelectedContentColor = Color.White,
+                    periodSelectorUnselectedContainerColor = Color(0xFFF4F6F4),
+                    periodSelectorUnselectedContentColor = Color.Gray,
+                    timeSelectorSelectedContainerColor = Color(0xFFEAF2EE),
+                    timeSelectorSelectedContentColor = Color(0xFF2D6A4F),
+                    timeSelectorUnselectedContainerColor = Color(0xFFF4F6F4),
+                    timeSelectorUnselectedContentColor = Color.Black
+                )
+            )
         }
+    }
+
+    if (showDeletionDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeletionDialog = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Delete Account", fontWeight = FontWeight.Bold, color = Color.Black) },
+            text = { Text("Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently removed.", color = Color(0xFF4A4A4A), fontSize = 14.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteAccount()
+                        showDeletionDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC0392B)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeletionDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2D6A4F))
+                ) {
+                    Text("Cancel", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
     }
 
     ProfileScreenContent(
         windowWidthSizeClass = windowWidthSizeClass,
         uiState = uiState,
         onSignOut = onSignOut,
+        onDeleteAccount = { showDeletionDialog = true },
         onToggleMorningBriefing = viewModel::toggleMorningBriefing,
         onToggleDeadlineAlerts = viewModel::toggleDeadlineAlerts,
-        onShowTimePicker = { showTimePicker = true }
+        onShowTimePicker = { showTimePicker = true },
+        onShowLeadTimePicker = { showLeadTimePicker = true },
+        onToggleCalendarSync = viewModel::toggleCalendarSync,
+        onShowWidgetsGallery = { showWidgetsGallery = true },
+        onUpgrade = {
+            showSubscriptionPlans = true
+        },
+        onShowWalkthrough = onShowWalkthrough
     )
+
+    if (showSubscriptionPlans) {
+        SubscriptionPaywallSheet(
+            onDismiss = { showSubscriptionPlans = false },
+            onPlanSelected = { tier ->
+                viewModel.setSubscriptionTier(tier)
+                showSubscriptionPlans = false
+            }
+        )
+    }
+
+    if (showWidgetsGallery) {
+        WidgetsGallerySheet(
+            onDismiss = { showWidgetsGallery = false }
+        )
+    }
 }
 
 @Composable
@@ -76,40 +200,117 @@ fun ProfileScreenContent(
     windowWidthSizeClass: WindowWidthSizeClass,
     uiState: ProfileUiState,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit,
+    onToggleCalendarSync: (Boolean) -> Unit = {},
+    onShowWidgetsGallery: () -> Unit = {},
+    onUpgrade: () -> Unit = {},
+    onShowWalkthrough: () -> Unit = {}
 ) {
     Scaffold(
-        containerColor = Color.White
+        containerColor = Color.White,
+        modifier = Modifier.statusBarsPadding()
     ) { paddingValues ->
         when (windowWidthSizeClass) {
             WindowWidthSizeClass.Medium -> ProfileMediumContent(
                 state = uiState,
                 modifier = Modifier.padding(paddingValues),
                 onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker
+                onShowTimePicker = onShowTimePicker,
+                onShowLeadTimePicker = onShowLeadTimePicker,
+                onToggleCalendarSync = onToggleCalendarSync,
+                onShowWidgetsGallery = onShowWidgetsGallery,
+                onUpgrade = onUpgrade,
+                onShowWalkthrough = onShowWalkthrough
             )
             WindowWidthSizeClass.Expanded -> ProfileLargeContent(
                 state = uiState,
                 modifier = Modifier.padding(paddingValues),
                 onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker
+                onShowTimePicker = onShowTimePicker,
+                onShowLeadTimePicker = onShowLeadTimePicker,
+                onToggleCalendarSync = onToggleCalendarSync,
+                onShowWidgetsGallery = onShowWidgetsGallery,
+                onUpgrade = onUpgrade,
+                onShowWalkthrough = onShowWalkthrough
             )
             else -> ProfileSmallContent(
                 state = uiState,
                 modifier = Modifier.padding(paddingValues),
                 onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker
+                onShowTimePicker = onShowTimePicker,
+                onShowLeadTimePicker = onShowLeadTimePicker,
+                onToggleCalendarSync = onToggleCalendarSync,
+                onShowWidgetsGallery = onShowWidgetsGallery,
+                onUpgrade = onUpgrade,
+                onShowWalkthrough = onShowWalkthrough
             )
         }
     }
+}
+
+@Composable
+fun LeadTimePickerDialog(
+    currentHours: Int,
+    onDismiss: () -> Unit,
+    onSelected: (Int) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(24.dp),
+        title = { Text("Deadline Alert Lead Time", fontWeight = FontWeight.Bold, color = Color.Black) },
+        text = {
+            Column {
+                listOf(1, 2, 3, 6, 12, 24).forEach { hours ->
+                    val isSelected = hours == currentHours
+                    Surface(
+                        color = if (isSelected) Color(0xFFEAF2EE) else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelected(hours) }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { onSelected(hours) },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2D6A4F))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (hours == 1) "1 hour before" else "$hours hours before",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color(0xFF2D6A4F) else Color.Black
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2D6A4F))
+            ) { Text("Cancel", fontWeight = FontWeight.SemiBold) }
+        }
+    )
 }
 
 @Composable
@@ -121,6 +322,8 @@ fun TimePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(24.dp),
         confirmButton = confirmButton,
         dismissButton = dismissButton,
         text = { content() }
@@ -132,9 +335,15 @@ fun ProfileSmallContent(
     state: ProfileUiState,
     modifier: Modifier = Modifier,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit,
+    onToggleCalendarSync: (Boolean) -> Unit,
+    onShowWidgetsGallery: () -> Unit,
+    onUpgrade: () -> Unit,
+    onShowWalkthrough: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -154,6 +363,25 @@ fun ProfileSmallContent(
         Spacer(modifier = Modifier.height(48.dp))
         
         UserInfoSection(name = state.userName, email = state.userEmail)
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+            SubscriptionCard(
+                tier = state.subscriptionTier, 
+                quotaLimit = state.quotaLimit, 
+                quotaRemaining = state.quotaRemaining, 
+                onUpgrade = onUpgrade
+            )
+
+        if (state.subscriptionTier == SubscriptionTier.PREMIUM) {
+            Spacer(modifier = Modifier.height(32.dp))
+            ProfileSectionHeader("PRO FEATURES")
+            PremiumFeaturesCard(
+                isCalendarSyncEnabled = state.isCalendarSyncEnabled,
+                onToggleCalendarSync = onToggleCalendarSync,
+                onShowWidgetsGallery = onShowWidgetsGallery
+            )
+        }
         
         Spacer(modifier = Modifier.height(48.dp))
         
@@ -162,13 +390,14 @@ fun ProfileSmallContent(
             state = state,
             onToggleMorningBriefing = onToggleMorningBriefing,
             onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-            onShowTimePicker = onShowTimePicker
+            onShowTimePicker = onShowTimePicker,
+            onShowLeadTimePicker = onShowLeadTimePicker
         )
         
         Spacer(modifier = Modifier.height(32.dp))
         
         ProfileSectionHeader("GENERAL")
-        GeneralCard()
+        GeneralCard(onShowWalkthrough = onShowWalkthrough)
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -177,11 +406,11 @@ fun ProfileSmallContent(
         
         Spacer(modifier = Modifier.height(48.dp))
         
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 32.dp),
-            contentAlignment = Alignment.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 "Sign Out",
@@ -189,6 +418,15 @@ fun ProfileSmallContent(
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp,
                 modifier = Modifier.clickable { onSignOut() }
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                "Delete Account",
+                color = Color.Gray,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable { onDeleteAccount() }
             )
         }
     }
@@ -199,9 +437,15 @@ fun ProfileMediumContent(
     state: ProfileUiState,
     modifier: Modifier = Modifier,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit,
+    onToggleCalendarSync: (Boolean) -> Unit,
+    onShowWidgetsGallery: () -> Unit,
+    onUpgrade: () -> Unit,
+    onShowWalkthrough: () -> Unit = {}
 ) {
     Row(
         modifier = modifier
@@ -219,11 +463,30 @@ fun ProfileMediumContent(
             Spacer(modifier = Modifier.height(24.dp))
             
             UserInfoRow(name = state.userName, email = state.userEmail)
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+                SubscriptionCard(
+                tier = state.subscriptionTier, 
+                quotaLimit = state.quotaLimit, 
+                quotaRemaining = state.quotaRemaining, 
+                onUpgrade = onUpgrade
+            )
+
+            if (state.subscriptionTier == SubscriptionTier.PREMIUM) {
+                Spacer(modifier = Modifier.height(24.dp))
+                ProfileSectionHeader("PRO FEATURES")
+                PremiumFeaturesCard(
+                    isCalendarSyncEnabled = state.isCalendarSyncEnabled,
+                    onToggleCalendarSync = onToggleCalendarSync,
+                    onShowWidgetsGallery = onShowWidgetsGallery
+                )
+            }
             
             Spacer(modifier = Modifier.height(32.dp))
             
             ProfileSectionHeader("GENERAL")
-            GeneralCardMedium()
+            GeneralCardMedium(onShowWalkthrough = onShowWalkthrough)
         }
 
         VerticalDivider(
@@ -251,7 +514,8 @@ fun ProfileMediumContent(
                 state = state,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker
+                onShowTimePicker = onShowTimePicker,
+                onShowLeadTimePicker = onShowLeadTimePicker
             )
             
             Spacer(modifier = Modifier.height(24.dp))
@@ -261,9 +525,9 @@ fun ProfileMediumContent(
             
             Spacer(modifier = Modifier.height(40.dp))
             
-            Box(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     "Sign Out",
@@ -271,6 +535,15 @@ fun ProfileMediumContent(
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
                     modifier = Modifier.clickable { onSignOut() }
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    "Delete Account",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable { onDeleteAccount() }
                 )
             }
             
@@ -284,9 +557,15 @@ fun ProfileLargeContent(
     state: ProfileUiState,
     modifier: Modifier = Modifier,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit,
+    onToggleCalendarSync: (Boolean) -> Unit,
+    onShowWidgetsGallery: () -> Unit,
+    onUpgrade: () -> Unit,
+    onShowWalkthrough: () -> Unit = {}
 ) {
     Row(
         modifier = modifier
@@ -298,6 +577,25 @@ fun ProfileLargeContent(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             UserInfoSection(name = state.userName, email = state.userEmail)
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+                SubscriptionCard(
+                tier = state.subscriptionTier, 
+                quotaLimit = state.quotaLimit, 
+                quotaRemaining = state.quotaRemaining, 
+                onUpgrade = onUpgrade
+            )
+
+            if (state.subscriptionTier == SubscriptionTier.PREMIUM) {
+                Spacer(modifier = Modifier.height(32.dp))
+                ProfileSectionHeader("PRO FEATURES")
+                PremiumFeaturesCard(
+                    isCalendarSyncEnabled = state.isCalendarSyncEnabled,
+                    onToggleCalendarSync = onToggleCalendarSync,
+                    onShowWidgetsGallery = onShowWidgetsGallery
+                )
+            }
             
             Spacer(modifier = Modifier.height(48.dp))
             
@@ -309,6 +607,15 @@ fun ProfileLargeContent(
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp,
                 modifier = Modifier.clickable { onSignOut() }
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                "Delete Account",
+                color = Color.Gray,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable { onDeleteAccount() }
             )
         }
 
@@ -337,7 +644,8 @@ fun ProfileLargeContent(
                 state = state,
                 onToggleMorningBriefing = onToggleMorningBriefing,
                 onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker
+                onShowTimePicker = onShowTimePicker,
+                onShowLeadTimePicker = onShowLeadTimePicker
             )
             
             Spacer(modifier = Modifier.height(32.dp))
@@ -345,7 +653,7 @@ fun ProfileLargeContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(modifier = Modifier.weight(1f)) {
                     ProfileSectionHeader("GENERAL")
-                    GeneralCardLarge()
+                    GeneralCardLarge(onShowWalkthrough = onShowWalkthrough)
                 }
                 
                 Column(modifier = Modifier.weight(1f)) {
@@ -362,8 +670,10 @@ fun NotificationsCard(
     state: ProfileUiState,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit
 ) {
+    val formattedTime = formatDisplayTime(state.preferredReminderTime)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -372,7 +682,7 @@ fun NotificationsCard(
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
             NotificationItem(
                 title = "Morning Briefing",
-                subtitle = "Daily summary at 8:00 AM",
+                subtitle = "Daily summary at $formattedTime",
                 checked = state.isMorningBriefingEnabled,
                 onCheckedChange = onToggleMorningBriefing
             )
@@ -384,8 +694,13 @@ fun NotificationsCard(
             )
             SettingItem(
                 title = "Notification Time",
-                value = state.preferredReminderTime,
+                value = formattedTime,
                 onClick = onShowTimePicker
+            )
+            SettingItem(
+                title = "Deadline Lead Time",
+                value = if (state.deadlineAlertLeadTimeHours == 1) "1 hour before" else "${state.deadlineAlertLeadTimeHours} hours before",
+                onClick = onShowLeadTimePicker
             )
         }
     }
@@ -396,8 +711,10 @@ fun NotificationsCardMedium(
     state: ProfileUiState,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit
 ) {
+    val formattedTime = formatDisplayTime(state.preferredReminderTime)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -406,7 +723,7 @@ fun NotificationsCardMedium(
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             NotificationItemMedium(
                 title = "Morning Briefing",
-                subtitle = "Daily summary at 8:00 AM",
+                subtitle = "Daily summary at $formattedTime",
                 checked = state.isMorningBriefingEnabled,
                 icon = Icons.Outlined.Notifications,
                 onCheckedChange = onToggleMorningBriefing
@@ -420,9 +737,15 @@ fun NotificationsCardMedium(
             )
             SettingItemMedium(
                 title = "Notification Time",
-                value = state.preferredReminderTime,
+                value = formattedTime,
                 icon = Icons.Outlined.AccessTime,
                 onClick = onShowTimePicker
+            )
+            SettingItemMedium(
+                title = "Deadline Lead Time",
+                value = if (state.deadlineAlertLeadTimeHours == 1) "1 hour before" else "${state.deadlineAlertLeadTimeHours} hours before",
+                icon = Icons.Outlined.Timer,
+                onClick = onShowLeadTimePicker
             )
         }
     }
@@ -433,8 +756,10 @@ fun NotificationsCardLarge(
     state: ProfileUiState,
     onToggleMorningBriefing: (Boolean) -> Unit,
     onToggleDeadlineAlerts: (Boolean) -> Unit,
-    onShowTimePicker: () -> Unit
+    onShowTimePicker: () -> Unit,
+    onShowLeadTimePicker: () -> Unit
 ) {
+    val formattedTime = formatDisplayTime(state.preferredReminderTime)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -443,7 +768,7 @@ fun NotificationsCardLarge(
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             NotificationItemMedium(
                 title = "Morning Briefing",
-                subtitle = "Daily summary at 8:00 AM",
+                subtitle = "Daily summary at $formattedTime",
                 checked = state.isMorningBriefingEnabled,
                 icon = Icons.Outlined.Notifications,
                 onCheckedChange = onToggleMorningBriefing
@@ -459,16 +784,22 @@ fun NotificationsCardLarge(
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
             SettingItemMedium(
                 title = "Notification Time",
-                value = state.preferredReminderTime,
+                value = formattedTime,
                 icon = Icons.Outlined.AccessTime,
                 onClick = onShowTimePicker
+            )
+            SettingItemMedium(
+                title = "Deadline Lead Time",
+                value = if (state.deadlineAlertLeadTimeHours == 1) "1 hour before" else "${state.deadlineAlertLeadTimeHours} hours before",
+                icon = Icons.Outlined.Timer,
+                onClick = onShowLeadTimePicker
             )
         }
     }
 }
 
 @Composable
-fun GeneralCardLarge() {
+fun GeneralCardLarge(onShowWalkthrough: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -477,11 +808,18 @@ fun GeneralCardLarge() {
     ) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             SettingItemMedium(
+                title = "App Tour & Capabilities",
+                value = null,
+                icon = Icons.Outlined.HelpOutline,
+                onClick = onShowWalkthrough
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
+            SettingItemMedium(
                 title = "Privacy & Data",
                 value = null,
                 icon = Icons.Outlined.Shield,
                 onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/privacy-policy"))
                     context.startActivity(intent)
                 }
             )
@@ -526,6 +864,227 @@ fun SupportCardLarge() {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
                     context.startActivity(intent)
                 }
+            )
+        }
+    }
+}
+
+@Composable
+fun SubscriptionPlansDialog(
+    currentTier: SubscriptionTier,
+    onDismiss: () -> Unit,
+    onTierChange: (SubscriptionTier) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(24.dp),
+        titleContentColor = Color.Black,
+        textContentColor = Color(0xFF4A4A4A),
+        confirmButton = {
+            if (currentTier == SubscriptionTier.FREE) {
+                Button(
+                    onClick = { onTierChange(SubscriptionTier.PREMIUM) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Upgrade Now", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                TextButton(
+                    onClick = { onTierChange(SubscriptionTier.FREE) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                ) {
+                    Text("Switch to Free (Test)", fontWeight = FontWeight.Medium)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2D6A4F))
+            ) { Text("Close", fontWeight = FontWeight.SemiBold) }
+        },
+        title = {
+            Text(
+                "Remindly Premium",
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Get more out of your AI memory with Remindly Premium.")
+                
+                PlanFeatureRow("Structured Captures", true)
+                PlanFeatureRow("Actionable Steps", true)
+                PlanFeatureRow("Daily Briefings", true)
+                PlanFeatureRow("Rich AI Summaries", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("Visual OCR (Flyers/Receipts)", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("Deep Web Synthesis", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("Unlimited PDF Processing", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("10x Higher Quotas", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+            }
+        }
+    )
+}
+
+@Composable
+private fun PlanFeatureRow(text: String, isIncluded: Boolean, isPremium: Boolean = false) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = if (isIncluded) Icons.Default.CheckCircle else Icons.Default.Circle,
+            contentDescription = null,
+            tint = if (isIncluded) Color(0xFF2D6A4F) else Color.LightGray,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isIncluded) Color.Black else Color.Gray,
+            textDecoration = if (!isIncluded && !isPremium) TextDecoration.LineThrough else null
+        )
+        if (isPremium && !isIncluded) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+                color = Color(0xFFF3E5F5),
+                shape = CircleShape
+            ) {
+                Text(
+                    "PRO",
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7B1FA2)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SubscriptionCard(tier: SubscriptionTier, quotaLimit: Int, quotaRemaining: Int, onUpgrade: () -> Unit) {
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (tier == SubscriptionTier.FREE) {
+                    Modifier.clickable { onUpgrade() }
+                } else {
+                    Modifier
+                }
+            ),
+        shape = RoundedCornerShape(24.dp),
+        color = if (tier == SubscriptionTier.PREMIUM) Color(0xFFEAF2EE) else MaterialTheme.colorScheme.surface,
+        border = if (tier == SubscriptionTier.PREMIUM) BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.3f)) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (tier == SubscriptionTier.PREMIUM) "Remindly Pro" else "Free Plan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (tier == SubscriptionTier.PREMIUM) Color(0xFF2D6A4F) else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (tier == SubscriptionTier.PREMIUM) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.Verified,
+                                contentDescription = "Verified Pro",
+                                tint = Color(0xFF2D6A4F),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = if (tier == SubscriptionTier.PREMIUM) "All Pro features unlocked" else "Basic AI extraction",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                    
+                    if (quotaLimit > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { (quotaRemaining.toFloat() / quotaLimit.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(0.6f).height(4.dp).clip(CircleShape),
+                            color = Color(0xFF2D6A4F),
+                            trackColor = Color.LightGray.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = "$quotaRemaining / $quotaLimit AI requests remaining",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+                
+                if (tier == SubscriptionTier.FREE) {
+                    Button(
+                        onClick = onUpgrade,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Upgrade", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://play.google.com/store/account/subscriptions?package=${context.packageName}")
+                                )
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Opening Google Play Subscriptions...", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text(
+                            "Manage",
+                            color = Color(0xFF2D6A4F),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PremiumFeaturesCard(
+    isCalendarSyncEnabled: Boolean,
+    onToggleCalendarSync: (Boolean) -> Unit,
+    onShowWidgetsGallery: () -> Unit = {}
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFF9FAF9)
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            NotificationItem(
+                title = "Google Calendar Sync",
+                subtitle = "Auto-sync events to your phone",
+                checked = isCalendarSyncEnabled,
+                onCheckedChange = onToggleCalendarSync
+            )
+            SettingItem(
+                title = "Widgets",
+                value = "Browse & add 6 Pro home screen widgets",
+                onClick = onShowWidgetsGallery
             )
         }
     }
@@ -618,7 +1177,7 @@ fun ProfileSectionHeader(title: String) {
 }
 
 @Composable
-fun GeneralCard() {
+fun GeneralCard(onShowWalkthrough: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -627,10 +1186,15 @@ fun GeneralCard() {
     ) {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
             SettingItem(
+                title = "App Tour & Capabilities",
+                value = null,
+                onClick = onShowWalkthrough
+            )
+            SettingItem(
                 title = "Privacy & Data",
                 value = null,
                 onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/privacy-policy"))
                     context.startActivity(intent)
                 }
             )
@@ -643,7 +1207,7 @@ fun GeneralCard() {
 }
 
 @Composable
-fun GeneralCardMedium() {
+fun GeneralCardMedium(onShowWalkthrough: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -652,11 +1216,17 @@ fun GeneralCardMedium() {
     ) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             SettingItemMedium(
+                title = "App Tour & Capabilities",
+                value = null,
+                icon = Icons.Outlined.Help,
+                onClick = onShowWalkthrough
+            )
+            SettingItemMedium(
                 title = "Privacy & Data",
                 value = null,
                 icon = Icons.Outlined.Shield,
                 onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("Https://victor-kirui.dev/remindly/privacy-policy"))
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/privacy-policy"))
                     context.startActivity(intent)
                 }
             )
@@ -908,9 +1478,12 @@ fun ProfileSmallScreenPreview() {
                 userEmail = "victor@example.com"
             ),
             onSignOut = {},
+            onDeleteAccount = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {}
+            onShowTimePicker = {},
+            onShowLeadTimePicker = {},
+            onUpgrade = {}
         )
     }
 }
@@ -926,9 +1499,12 @@ fun ProfileMediumScreenPreview() {
                 userEmail = "victor@example.com"
             ),
             onSignOut = {},
+            onDeleteAccount = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {}
+            onShowTimePicker = {},
+            onShowLeadTimePicker = {},
+            onUpgrade = {}
         )
     }
 }
@@ -944,9 +1520,12 @@ fun ProfileLargeScreenPreview() {
                 userEmail = "victor@example.com"
             ),
             onSignOut = {},
+            onDeleteAccount = {},
             onToggleMorningBriefing = {},
             onToggleDeadlineAlerts = {},
-            onShowTimePicker = {}
+            onShowTimePicker = {},
+            onShowLeadTimePicker = {},
+            onUpgrade = {}
         )
     }
 }

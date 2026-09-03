@@ -4,11 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.victorkirui.local.entity.ReminderWithItem
 import com.victorkirui.local.repository.LocalRepository
+import com.victorkirui.core.repository.AuthRepository
 import kotlinx.coroutines.flow.*
 import java.time.LocalDate
 import java.time.YearMonth
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class RemindersViewModel(
+    private val authRepository: AuthRepository,
     private val localRepository: LocalRepository
 ) : ViewModel() {
 
@@ -18,50 +22,58 @@ class RemindersViewModel(
     private val _currentMonth = MutableStateFlow(YearMonth.now())
     val currentMonth = _currentMonth.asStateFlow()
 
-    val uiState: StateFlow<RemindersUiState> = combine(
-        localRepository.getAllRemindersWithItems(),
-        localRepository.getAllItems(),
-        _selectedDate,
-        _currentMonth
-    ) { allReminders, allItems, selectedDate, currentMonth ->
-        val today = LocalDate.now()
-        
-        // Group items for "Upcoming" section by date relationship
-        val upcomingGrouped = allItems
-            .filter { it.status != "DONE" }
-            .filter { 
-                val dateStr = it.deadline ?: it.eventDate
-                if (dateStr != null) {
-                    val date = parseDate(dateStr)
-                    !date.isBefore(today)
-                } else false
-            }
-            .groupBy { 
-                val date = parseDate(it.deadline ?: it.eventDate!!)
-                when {
-                    date == today -> "Today"
-                    date == today.plusDays(1) -> "Tomorrow"
-                    date.isBefore(today.plusWeeks(1)) -> "This Week"
-                    else -> "Later"
+    val uiState: StateFlow<RemindersUiState> = authRepository.currentUser
+        .flatMapLatest { user ->
+            val userId = user?.uid ?: ""
+            if (userId.isEmpty()) {
+                flowOf(RemindersUiState.Success(emptyList(), emptyList(), LocalDate.now(), YearMonth.now(), emptyList(), emptyMap()))
+            } else {
+                combine(
+                    localRepository.getAllRemindersWithItems(userId),
+                    localRepository.getAllItems(userId),
+                    _selectedDate,
+                    _currentMonth
+                ) { allReminders, allItems, selectedDate, currentMonth ->
+                    val today = LocalDate.now()
+                    
+                    // Group items for "Upcoming" section by date relationship
+                    val upcomingGrouped = allItems
+                        .filter { it.status != "DONE" }
+                        .filter { 
+                            val dateStr = it.deadline ?: it.eventDate
+                            if (dateStr != null) {
+                                val date = parseDate(dateStr)
+                                !date.isBefore(today)
+                            } else false
+                        }
+                        .groupBy { 
+                            val date = parseDate(it.deadline ?: it.eventDate!!)
+                            when {
+                                date == today -> "Today"
+                                date == today.plusDays(1) -> "Tomorrow"
+                                date.isBefore(today.plusWeeks(1)) -> "This Week"
+                                else -> "Later"
+                            }
+                        }
+
+                    RemindersUiState.Success(
+                        allReminders = allReminders,
+                        allItems = allItems,
+                        selectedDate = selectedDate,
+                        currentMonth = currentMonth,
+                        itemsForSelectedDate = allItems.filter { 
+                            val dateStr = it.deadline ?: it.eventDate
+                            dateStr != null && parseDate(dateStr) == selectedDate
+                        },
+                        upcomingGrouped = upcomingGrouped
+                    )
                 }
             }
-
-        RemindersUiState.Success(
-            allReminders = allReminders,
-            allItems = allItems,
-            selectedDate = selectedDate,
-            currentMonth = currentMonth,
-            itemsForSelectedDate = allItems.filter { 
-                val dateStr = it.deadline ?: it.eventDate
-                dateStr != null && parseDate(dateStr) == selectedDate
-            },
-            upcomingGrouped = upcomingGrouped
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = RemindersUiState.Success(emptyList(), emptyList(), LocalDate.now(), YearMonth.now(), emptyList(), emptyMap())
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = RemindersUiState.Loading
-    )
 
     private fun parseDate(dateStr: String): LocalDate {
         return try {

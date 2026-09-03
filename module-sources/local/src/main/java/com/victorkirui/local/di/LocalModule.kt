@@ -15,6 +15,7 @@ val localModule = module {
             RemindlyDatabase::class.java,
             "remindly_db"
         )
+        .addMigrations(RemindlyDatabase.MIGRATION_6_7, RemindlyDatabase.MIGRATION_7_8)
         .addCallback(object : RoomDatabase.Callback() {
             override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 super.onOpen(db)
@@ -26,6 +27,8 @@ val localModule = module {
     }
     single { get<RemindlyDatabase>().itemDao() }
     single { get<RemindlyDatabase>().pendingSyncDao() }
+    single { get<RemindlyDatabase>().pendingDeletionDao() }
     single { get<RemindlyDatabase>().reminderDao() }
-    single<LocalRepository> { LocalRepositoryImpl(get(), get(), get(), get()) }
+    single<LocalRepository> { LocalRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<com.victorkirui.core.data.DataClearer> { get<LocalRepository>() }
 }

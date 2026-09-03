@@ -31,12 +31,11 @@ import com.victorkirui.local.entity.Item
 import com.victorkirui.local.entity.Reminder
 import com.victorkirui.core.ui.theme.*
 import com.victorkirui.core.R
+import com.victorkirui.core.repository.SubscriptionTier
+import com.victorkirui.core.util.DateUtils
 import com.victorkirui.module_features.capturing.SourceIcon
 import com.victorkirui.module_features.capturing.SourceIconProvider
 import org.koin.androidx.compose.koinViewModel
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import androidx.compose.ui.platform.LocalUriHandler
 import android.content.Intent
 import androidx.core.content.FileProvider
@@ -44,26 +43,6 @@ import java.io.File
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextOverflow
 
-private fun getTimeAgo(dateTimeStr: String): String {
-    return try {
-        val past = java.time.Instant.parse(dateTimeStr).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
-        val now = LocalDateTime.now()
-        val minutes = ChronoUnit.MINUTES.between(past, now)
-        val hours = ChronoUnit.HOURS.between(past, now)
-        val days = ChronoUnit.DAYS.between(past, now)
-
-        when {
-            minutes < 1 -> "Saved just now"
-            minutes < 60 -> "Saved ${minutes}m ago"
-            hours < 24 -> "Saved ${hours}h ago"
-            days == 1L -> "Saved yesterday"
-            days < 7 -> "Saved ${days}d ago"
-            else -> "Saved on ${past.format(DateTimeFormatter.ofPattern("MMM dd, yyyy"))}"
-        }
-    } catch (e: Exception) {
-        "Saved recently"
-    }
-}
 
 private fun openMedia(context: android.content.Context, uriString: String) {
     try {
@@ -96,6 +75,27 @@ fun ItemDetailsScreen(
     val context = LocalContext.current
     val windowSizeClass = calculateWindowSizeClass(context as Activity)
 
+    val calendarPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions[android.Manifest.permission.WRITE_CALENDAR] == true) {
+            viewModel.syncToCalendar()
+        }
+    }
+
+    val calendarSyncResult by viewModel.calendarSyncResult.collectAsState(initial = false)
+    val lastSyncedEventUri by viewModel.lastSyncedEventUri.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.calendarSyncResult.collect { success ->
+            if (success) {
+                android.widget.Toast.makeText(context, "Added to Google Calendar", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(context, "Failed to add to calendar", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     LaunchedEffect(itemId) {
         viewModel.loadItem(itemId)
     }
@@ -114,7 +114,38 @@ fun ItemDetailsScreen(
         onUnmarkAsDone = {
             viewModel.unmarkAsDone()
         },
-        windowWidthSizeClass = windowSizeClass.widthSizeClass
+        onRetry = {
+            viewModel.retryAnalysis()
+        },
+        onSyncToCalendar = {
+            val permissions = arrayOf(
+                android.Manifest.permission.WRITE_CALENDAR,
+                android.Manifest.permission.READ_CALENDAR
+            )
+            val allGranted = permissions.all { 
+                androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED 
+            }
+
+            if (allGranted) {
+                viewModel.syncToCalendar()
+            } else {
+                calendarPermissionLauncher.launch(permissions)
+            }
+        },
+        onViewInCalendar = {
+            lastSyncedEventUri?.let { uriStr ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = android.net.Uri.parse(uriStr)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    android.util.Log.e("ItemDetails", "Failed to open calendar event: ${e.message}")
+                }
+            }
+        },
+        windowWidthSizeClass = windowSizeClass.widthSizeClass,
+        hasSynced = lastSyncedEventUri != null
     )
 }
 
@@ -127,13 +158,25 @@ fun ItemDetailsScreenContent(
     onDelete: () -> Unit = {},
     onMarkAsDone: () -> Unit = {},
     onUnmarkAsDone: () -> Unit = {},
-    windowWidthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact
+    onRetry: () -> Unit = {},
+    onSyncToCalendar: () -> Unit = {},
+    onViewInCalendar: () -> Unit = {},
+    windowWidthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact,
+    hasSynced: Boolean = false
 ) {
     val isExpanded = windowWidthSizeClass != WindowWidthSizeClass.Compact
     var showMenu by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
     var showDoneSuccess by rememberSaveable { mutableStateOf(false) }
     var showUndoConfirm by rememberSaveable { mutableStateOf(false) }
+    var showSubscriptionPlans by rememberSaveable { mutableStateOf(false) }
+
+    if (showSubscriptionPlans) {
+        com.victorkirui.module_features.subscription.SubscriptionPaywallSheet(
+            onDismiss = { showSubscriptionPlans = false },
+            onPlanSelected = { showSubscriptionPlans = false }
+        )
+    }
 
     val item = (uiState as? ItemDetailsUiState.Success)?.item
     val isDone = item?.status == "DONE"
@@ -141,6 +184,9 @@ fun ItemDetailsScreenContent(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = { Text("Delete Capture?") },
             text = { Text("This action cannot be undone. Are you sure you want to delete this capture?") },
             confirmButton = {
@@ -165,6 +211,9 @@ fun ItemDetailsScreenContent(
     if (showUndoConfirm) {
         AlertDialog(
             onDismissRequest = { showUndoConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = { Text("Undo Mark as Done?") },
             text = { Text("Do you want to set this capture back to active?") },
             confirmButton = {
@@ -188,6 +237,9 @@ fun ItemDetailsScreenContent(
     if (showDoneSuccess) {
         AlertDialog(
             onDismissRequest = { showDoneSuccess = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             confirmButton = {
                 TextButton(onClick = { showDoneSuccess = false }) {
                     Text("OK")
@@ -236,6 +288,7 @@ fun ItemDetailsScreenContent(
                         }
                     },
                     actions = {
+                        /* Removed redundant sync icon here as there is a prominent button in the content */
                         IconButton(onClick = onEdit) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
@@ -256,6 +309,20 @@ fun ItemDetailsScreenContent(
                                 onDismissRequest = { showMenu = false },
                                 modifier = Modifier.background(Color.White)
                             ) {
+                                val state = uiState as? ItemDetailsUiState.Success
+                                if (state != null && state.tier == SubscriptionTier.PREMIUM && (state.item.eventDate != null || state.item.deadline != null)) {
+                                    DropdownMenuItem(
+                                        text = { Text("Sync to Calendar") },
+                                        onClick = {
+                                            onSyncToCalendar()
+                                            showMenu = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF2D6A4F))
+                                        }
+                                    )
+                                }
+                                
                                 if (!isDone) {
                                     DropdownMenuItem(
                                         text = { Text("Mark as Done") },
@@ -313,17 +380,40 @@ fun ItemDetailsScreenContent(
                 }
             }
             is ItemDetailsUiState.Success -> {
-                if (isExpanded) {
-                    TwoPaneLayout(
-                        state.item,
-                        state.reminders,
-                        innerPadding,
-                        onDelete = onDelete,
-                        onMarkAsDone = onMarkAsDone,
-                        onUnmarkAsDone = onUnmarkAsDone
-                    )
-                } else {
-                    SinglePaneLayout(state.item, state.reminders, innerPadding)
+                Column(
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .then(if (isExpanded) Modifier.statusBarsPadding() else Modifier)
+                ) {
+                    StatusBanner(state.item.status, onRetry)
+                    if (isExpanded) {
+                        TwoPaneLayout(
+                            state.item,
+                            state.reminders,
+                            PaddingValues(0.dp), // innerPadding handled by Column
+                            onDelete = onDelete,
+                            onMarkAsDone = onMarkAsDone,
+                            onUnmarkAsDone = onUnmarkAsDone,
+                            onRetry = onRetry,
+                            onSyncToCalendar = onSyncToCalendar,
+                            onViewInCalendar = onViewInCalendar,
+                            tier = state.tier,
+                            hasSynced = hasSynced,
+                            onUpgrade = { showSubscriptionPlans = true }
+                        )
+                    } else {
+                        SinglePaneLayout(
+                            state.item,
+                            state.reminders,
+                            PaddingValues(0.dp),
+                            state.tier,
+                            onRetry = onRetry,
+                            onSyncToCalendar = onSyncToCalendar,
+                            onViewInCalendar = onViewInCalendar,
+                            hasSynced = hasSynced,
+                            onUpgrade = { showSubscriptionPlans = true }
+                        )
+                    }
                 }
             }
         }
@@ -331,14 +421,62 @@ fun ItemDetailsScreenContent(
 }
 
 @Composable
-fun SinglePaneLayout(item: Item, reminders: List<Reminder>, innerPadding: PaddingValues) {
+fun StatusBanner(status: String, onRetry: () -> Unit) {
+    if (status == "FAILED" || status == "RETRYING") {
+        val (text, color, icon) = when (status) {
+            "FAILED" -> Triple("Analysis failed. Remindly couldn't extract details.", Color(0xFFFFF1F0), Icons.Default.Error)
+            else -> Triple("Analysis in progress. Retrying soon...", Color(0xFFF0F5FF), Icons.Default.Sync)
+        }
+        
+        Surface(
+            color = color,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(icon, contentDescription = null, tint = if (status == "FAILED") Color(0xFFCF1322) else Color(0xFF1D39C4))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                if (status == "FAILED") {
+                    TextButton(onClick = onRetry) {
+                        Text("Retry", fontWeight = FontWeight.Bold, color = Color(0xFFCF1322))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SinglePaneLayout(
+    item: Item, 
+    reminders: List<Reminder>, 
+    innerPadding: PaddingValues, 
+    tier: SubscriptionTier = SubscriptionTier.FREE,
+    onRetry: () -> Unit = {},
+    onSyncToCalendar: () -> Unit = {},
+    onViewInCalendar: () -> Unit = {},
+    hasSynced: Boolean = false,
+    onUpgrade: () -> Unit = {}
+) {
     Column(
         modifier = Modifier
             .padding(innerPadding)
             .fillMaxSize()
     ) {
         SourceSubheader(item)
-        ItemDetailsContent(item, reminders)
+        ItemDetailsContent(
+            item = item,
+            reminders = reminders,
+            tier = tier,
+            onRetry = onRetry,
+            onSyncToCalendar = onSyncToCalendar,
+            onViewInCalendar = onViewInCalendar,
+            hasSynced = hasSynced,
+            onUpgrade = onUpgrade
+        )
     }
 }
 
@@ -349,7 +487,13 @@ fun TwoPaneLayout(
     innerPadding: PaddingValues,
     onDelete: () -> Unit = {},
     onMarkAsDone: () -> Unit = {},
-    onUnmarkAsDone: () -> Unit = {}
+    onUnmarkAsDone: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    onSyncToCalendar: () -> Unit = {},
+    onViewInCalendar: () -> Unit = {},
+    tier: SubscriptionTier = SubscriptionTier.FREE,
+    hasSynced: Boolean = false,
+    onUpgrade: () -> Unit = {}
 ) {
     var showMenu by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
@@ -361,6 +505,9 @@ fun TwoPaneLayout(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = { Text("Delete Capture?") },
             text = { Text("This action cannot be undone. Are you sure you want to delete this capture?") },
             confirmButton = {
@@ -385,6 +532,9 @@ fun TwoPaneLayout(
     if (showUndoConfirm) {
         AlertDialog(
             onDismissRequest = { showUndoConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = { Text("Undo Mark as Done?") },
             text = { Text("Do you want to set this capture back to active?") },
             confirmButton = {
@@ -408,6 +558,9 @@ fun TwoPaneLayout(
     if (showDoneSuccess) {
         AlertDialog(
             onDismissRequest = { showDoneSuccess = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             confirmButton = {
                 TextButton(onClick = { showDoneSuccess = false }) {
                     Text("OK")
@@ -472,6 +625,19 @@ fun TwoPaneLayout(
                         onDismissRequest = { showMenu = false },
                         modifier = Modifier.background(Color.White)
                     ) {
+                        if (tier == SubscriptionTier.PREMIUM && (item.eventDate != null || item.deadline != null)) {
+                            DropdownMenuItem(
+                                text = { Text("Sync to Calendar") },
+                                onClick = {
+                                    onSyncToCalendar()
+                                    showMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF2D6A4F))
+                                }
+                            )
+                        }
+
                         if (!isDone) {
                             DropdownMenuItem(
                                 text = { Text("Mark as Done") },
@@ -549,7 +715,7 @@ fun TwoPaneLayout(
                         )
                     }
                     Text(
-                        text = getTimeAgo(item.createdAt),
+                        text = DateUtils.getTimeAgo(item.createdAt),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
@@ -584,7 +750,27 @@ fun TwoPaneLayout(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            AiSummarySection(item)
+            AiSummarySection(
+                item = item,
+                tier = tier,
+                onRetryAnalysis = onRetry,
+                onUpgrade = onUpgrade
+            )
+            
+            if (tier == SubscriptionTier.PREMIUM && (item.eventDate != null || item.deadline != null)) {
+                Button(
+                    onClick = onSyncToCalendar,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))
+                ) {
+                    Icon(Icons.Default.CalendarToday, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sync to Google Calendar", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            ChecklistSection(item.checklist)
             MetadataSection(item)
             RemindersSection(reminders)
             RelatedSection()
@@ -630,7 +816,7 @@ fun SourceSubheader(item: Item) {
                 )
             }
             Text(
-                text = getTimeAgo(item.createdAt),
+                text = DateUtils.getTimeAgo(item.createdAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -666,8 +852,14 @@ fun OriginalCaptureSection(item: Item) {
 }
 
 @Composable
-fun AiSummarySection(item: Item) {
-    item.summary?.let { summary ->
+fun AiSummarySection(
+    item: Item,
+    tier: SubscriptionTier = SubscriptionTier.FREE,
+    onRetryAnalysis: () -> Unit = {},
+    onUpgrade: () -> Unit = {}
+) {
+    val summary = item.summary
+    if (!summary.isNullOrBlank()) {
         RemindlyCard(containerColor = MaterialTheme.colorScheme.primaryContainer) { // SoftMint
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -693,6 +885,83 @@ fun AiSummarySection(item: Item) {
                 )
             }
         }
+        return
+    }
+
+    if (tier == SubscriptionTier.PREMIUM) {
+        // Pro user, but summary is missing/null (e.g. captured before upgrading)
+        RemindlyCard(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("AI Summary", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("No AI summary generated for this capture yet.", style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onRetryAnalysis,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Generate AI Summary", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
+    } else {
+        // Free user
+        RemindlyCard(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AutoAwesome, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Executive Summary", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Text("Upgrade to Premium for rich AI summaries of your captures.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onUpgrade,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Upgrade to Pro", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChecklistSection(checklist: List<String>?) {
+    if (checklist.isNullOrEmpty()) return
+    
+    SectionTitle("ACTIONABLE STEPS")
+    RemindlyCard {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            checklist.forEach { step ->
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                        tint = Color(0xFF2D6A4F)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = step,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Black
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -700,17 +969,34 @@ fun AiSummarySection(item: Item) {
 fun MetadataSection(item: Item) {
     RemindlyCard {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            MetadataRow(
-                icon = Icons.Default.CalendarToday,
-                label = "Deadline",
-                value = item.deadline ?: "N/A",
-                isUrgent = item.deadline != null
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
+            if (item.deadline != null) {
+                MetadataRow(
+                    icon = Icons.Default.CalendarToday,
+                    label = "Deadline",
+                    value = DateUtils.getReadableDeadline(item.deadline),
+                    isUrgent = true
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+            }
+            
+            if (item.eventDate != null) {
+                MetadataRow(
+                    icon = Icons.Default.Event,
+                    label = "Event Date",
+                    value = DateUtils.getReadableDeadline(item.eventDate),
+                    isBold = true
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+            }
+
             MetadataRow(
                 icon = Icons.Default.Business,
                 label = "Organisation",
@@ -750,7 +1036,7 @@ fun MetadataSection(item: Item) {
             MetadataRow(
                 icon = Icons.Default.AccessTime,
                 label = "Saved",
-                value = getTimeAgo(item.createdAt),
+                value = DateUtils.getTimeAgo(item.createdAt),
                 isBold = true
             )
         }
@@ -767,7 +1053,7 @@ fun RemindersSection(reminders: List<Reminder>) {
             reminders.forEachIndexed { index, reminder ->
                 ReminderRow(
                     label = reminder.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() },
-                    value = reminder.reminderDateTime.substring(0, 10) // Simple date extract
+                    value = DateUtils.formatDisplayDate(reminder.reminderDateTime)
                 )
                 if (index < reminders.size - 1) {
                     HorizontalDivider(
@@ -906,7 +1192,17 @@ fun OpenLinkButton(url: String?) {
 }
 
 @Composable
-fun ItemDetailsContent(item: Item, reminders: List<Reminder>, modifier: Modifier = Modifier) {
+fun ItemDetailsContent(
+    item: Item, 
+    reminders: List<Reminder>, 
+    modifier: Modifier = Modifier, 
+    tier: SubscriptionTier = SubscriptionTier.FREE,
+    onRetry: () -> Unit = {},
+    onSyncToCalendar: () -> Unit = {},
+    onViewInCalendar: () -> Unit = {},
+    hasSynced: Boolean = false,
+    onUpgrade: () -> Unit = {}
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -915,7 +1211,32 @@ fun ItemDetailsContent(item: Item, reminders: List<Reminder>, modifier: Modifier
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         OriginalCaptureSection(item)
-        AiSummarySection(item)
+        AiSummarySection(item, tier, onRetryAnalysis = onRetry, onUpgrade = onUpgrade)
+        
+        if (tier == SubscriptionTier.PREMIUM && (item.eventDate != null || item.deadline != null)) {
+            Button(
+                onClick = if (hasSynced) onViewInCalendar else onSyncToCalendar, 
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (hasSynced) Color(0xFFEAF2EE) else Color(0xFF4285F4)
+                )
+            ) {
+                Icon(
+                    imageVector = if (hasSynced) Icons.Default.CheckCircle else Icons.Default.CalendarToday, 
+                    contentDescription = null,
+                    tint = if (hasSynced) Color(0xFF2D6A4F) else Color.White
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (hasSynced) "View in Google Calendar" else "Sync to Google Calendar", 
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasSynced) Color(0xFF2D6A4F) else Color.White
+                )
+            }
+        }
+
+        ChecklistSection(item.checklist)
         MetadataSection(item)
         
         // Contact Section in single pane
@@ -1154,6 +1475,7 @@ fun RemindlyCard(
 fun ItemDetailsPreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Internship",
         summary = "Google is hiring software engineering interns for Summer 2025. The role is based in London and requires experience in Python or Java. Application deadline is 31 August 2025.",
         category = "Job Opportunity",
@@ -1169,7 +1491,8 @@ fun ItemDetailsPreview() {
     RemindlyTheme {
         ItemDetailsScreenContent(
             uiState = ItemDetailsUiState.Success(sampleItem),
-            onBack = {}
+            onBack = {},
+            onRetry = {}
         )
     }
 }
@@ -1179,6 +1502,7 @@ fun ItemDetailsPreview() {
 fun ItemDetailsDonePreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Internship (Completed)",
         summary = "Google is hiring software engineering interns for Summer 2025.",
         category = "Job Opportunity",
@@ -1194,7 +1518,8 @@ fun ItemDetailsDonePreview() {
     RemindlyTheme {
         ItemDetailsScreenContent(
             uiState = ItemDetailsUiState.Success(sampleItem),
-            onBack = {}
+            onBack = {},
+            onRetry = {}
         )
     }
 }
@@ -1204,6 +1529,7 @@ fun ItemDetailsDonePreview() {
 fun ItemDetailsLargeScreenPreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Internship",
         summary = "Google is hiring software engineering interns for Summer 2025. The role is based in London and requires experience in Python or Java. Application deadline is 31 August 2025.",
         category = "Job Opportunity",
@@ -1220,6 +1546,7 @@ fun ItemDetailsLargeScreenPreview() {
         ItemDetailsScreenContent(
             uiState = ItemDetailsUiState.Success(sampleItem),
             onBack = {},
+            onRetry = {},
             windowWidthSizeClass = WindowWidthSizeClass.Expanded
         )
     }

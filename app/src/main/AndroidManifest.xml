@@ -3,10 +3,13 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="com.android.vending.BILLING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" /> <!-- Often needed to find which calendar to write to -->
 
     <application
         android:allowBackup="true"
@@ -23,6 +26,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.Remindly"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -63,6 +67,93 @@
             android:name="com.victorkirui.module_features.reminder.ReminderReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name="com.victorkirui.module_features.reminder.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Small Calendar Widget (2x1) -->
+        <receiver
+            android:name=".widget.SmallCalendarWidgetReceiver"
+            android:exported="true"
+            android:label="Small Calendar Widget (2x1)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/small_calendar_widget_info" />
+        </receiver>
+
+        <!-- Medium Calendar Widget (4x2) -->
+        <receiver
+            android:name=".widget.MediumCalendarWidgetReceiver"
+            android:exported="true"
+            android:label="Medium Calendar Widget (4x2)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/medium_calendar_widget_info" />
+        </receiver>
+
+        <!-- Large Calendar Widget (4x4) -->
+        <receiver
+            android:name=".widget.LargeCalendarWidgetReceiver"
+            android:exported="true"
+            android:label="Large Calendar Widget (4x4)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/large_calendar_widget_info" />
+        </receiver>
+
+        <!-- Small Upcoming Deadline Widget (2x1) -->
+        <receiver
+            android:name=".widget.SmallUpcomingWidgetReceiver"
+            android:exported="true"
+            android:label="Small Upcoming Widget (2x1)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/small_upcoming_widget_info" />
+        </receiver>
+
+        <!-- Medium Upcoming Deadline Widget (4x2) -->
+        <receiver
+            android:name=".widget.MediumUpcomingWidgetReceiver"
+            android:exported="true"
+            android:label="Medium Upcoming Widget (4x2)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/medium_upcoming_widget_info" />
+        </receiver>
+
+        <!-- Large Upcoming Deadline Widget (4x4) -->
+        <receiver
+            android:name=".widget.LargeUpcomingWidgetReceiver"
+            android:exported="true"
+            android:label="Large Upcoming Widget (4x4)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/large_upcoming_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -72,6 +163,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- AppFunctions Service -->
+        <service
+            android:name="androidx.appfunctions.AppFunctionService"
+            android:permission="android.permission.BIND_APP_FUNCTION_SERVICE"
+            android:exported="true"
+            tools:targetApi="36">
+            <intent-filter>
+                <action android:name="androidx.appfunctions.AppFunctionService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

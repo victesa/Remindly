@@ -2,6 +2,7 @@ package com.victorkirui.remindly.nav
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
@@ -10,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
@@ -27,6 +30,8 @@ import com.victorkirui.module_features.reminders.RemindersScreen
 import com.victorkirui.module_features.auth.SignUpScreen
 import com.victorkirui.module_features.auth.SignInScreen
 import com.victorkirui.module_features.onboarding.OnboardingScreen
+import com.victorkirui.module_features.subscription.SubscriptionPaywallSheet
+import com.victorkirui.module_features.capturing.SyncDownWorker
 import com.victorkirui.core.repository.AuthRepository
 import com.victorkirui.core.repository.OnboardingRepository
 import androidx.compose.runtime.collectAsState
@@ -45,7 +50,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 fun RemindlyNavigation(
     shareContent: ShareContent,
     initialItemId: String? = null,
-    windowWidthSizeClass: WindowWidthSizeClass
+    initialOpenCapture: Boolean = false,
+    initialSelectedDate: String? = null,
+    initialOpenPaywall: Boolean = false,
+    windowWidthSizeClass: WindowWidthSizeClass,
+    onIntentHandled: () -> Unit = {}
 ) {
     val authRepository: AuthRepository = org.koin.compose.koinInject()
     val onboardingRepository: OnboardingRepository = org.koin.compose.koinInject()
@@ -56,10 +65,34 @@ fun RemindlyNavigation(
 
     val navController = rememberNavController()
     
-    // Handle initial navigation if itemId is provided
-    androidx.compose.runtime.LaunchedEffect(initialItemId) {
+    // Handle initial navigation if itemId or date or capture or paywall is provided
+    androidx.compose.runtime.LaunchedEffect(initialItemId, currentUser, hasSeenOnboarding) {
         if (initialItemId != null && currentUser != null && hasSeenOnboarding == true) {
             navController.navigate("details/$initialItemId")
+            onIntentHandled()
+        }
+    }
+
+    var showCaptureOptions by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(initialOpenCapture) {
+        if (initialOpenCapture) {
+            showCaptureOptions = true
+            onIntentHandled()
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(initialOpenPaywall, currentUser, hasSeenOnboarding) {
+        if (initialOpenPaywall && currentUser != null && hasSeenOnboarding == true) {
+            navController.navigate("paywall")
+            onIntentHandled()
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(initialSelectedDate, currentUser, hasSeenOnboarding) {
+        if (initialSelectedDate != null && currentUser != null && hasSeenOnboarding == true) {
+            navController.navigate("reminders")
+            onIntentHandled()
         }
     }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -69,14 +102,13 @@ fun RemindlyNavigation(
     val startDestination = when {
         hasSeenOnboarding == null -> "loading" // Wait for DataStore
         hasSeenOnboarding == false -> "onboarding"
-        currentUser == null -> "signUp"
+        currentUser == null -> "signIn"
         shareContent is ShareContent.Unknown -> "home"
         else -> "capture"
     }
 
     val isLargeScreen = windowWidthSizeClass == WindowWidthSizeClass.Expanded
 
-    var showCaptureOptions by remember { mutableStateOf(false) }
     val capturingViewModel: CapturingViewModel = org.koin.androidx.compose.koinViewModel()
 
     // Map routes to display names for the navigation components
@@ -88,18 +120,50 @@ fun RemindlyNavigation(
         else -> null
     }
 
+    val subscriptionRepository: com.victorkirui.core.repository.SubscriptionRepository = org.koin.compose.koinInject()
+    val hasPendingCelebration by subscriptionRepository.hasPendingProCelebration.collectAsState(initial = false)
+    var showProCelebration by remember { mutableStateOf(false) }
+
+    val hasSeenHomeWalkthrough by onboardingRepository.hasSeenHomeWalkthrough.collectAsState(initial = true)
+    var showWalkthroughOverlay by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(hasSeenHomeWalkthrough, currentUser, currentRoute) {
+        if (hasSeenHomeWalkthrough == false && currentUser != null && (currentRoute == "home" || currentRoute == null)) {
+            showWalkthroughOverlay = true
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(hasPendingCelebration, currentRoute) {
+        if (hasPendingCelebration && currentRoute == "home") {
+            showProCelebration = true
+            kotlinx.coroutines.delay(6000L) // Show celebration for 6 seconds total
+            showProCelebration = false
+            subscriptionRepository.consumeProCelebration()
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        fun navigateToTab(route: String) {
+        navController.navigate(route) {
+            popUpTo("home") {
+                saveState = true
+                inclusive = false
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Row(
         modifier = Modifier.fillMaxSize()
     ) {
         if (isLargeScreen && screenName != null) {
             RemindlyNavigationRail(
                 currentScreen = screenName,
-                onHomeClick = { navController.navigate("home") {
-                    popUpTo("home") { inclusive = true }
-                } },
-                onInboxClick = { navController.navigate("inbox") },
-                onRemindersClick = { navController.navigate("reminders") },
-                onProfileClick = { navController.navigate("profile") },
+                onHomeClick = { navigateToTab("home") },
+                onInboxClick = { navigateToTab("inbox") },
+                onRemindersClick = { navigateToTab("reminders") },
+                onProfileClick = { navigateToTab("profile") },
                 onAddClick = { showCaptureOptions = true }
             )
         }
@@ -110,28 +174,27 @@ fun RemindlyNavigation(
                 if (!isLargeScreen && screenName != null) {
                     RemindlyBottomNavigation(
                         currentScreen = screenName,
-                        onHomeClick = { navController.navigate("home") {
-                            popUpTo("home") { inclusive = true }
-                        } },
-                        onInboxClick = { navController.navigate("inbox") },
-                        onRemindersClick = { navController.navigate("reminders") },
-                        onProfileClick = { navController.navigate("profile") }
+                        onHomeClick = { navigateToTab("home") },
+                        onInboxClick = { navigateToTab("inbox") },
+                        onRemindersClick = { navigateToTab("reminders") },
+                        onProfileClick = { navigateToTab("profile") }
                     )
                 }
             },
             floatingActionButton = {
-                // Show FAB on main screens if not on large screen (where it's in the rail)
                 val mainScreens = listOf("home", "inbox", "reminders", "profile")
                 val showFab = currentRoute in mainScreens && !isLargeScreen
                 if (showFab) {
-                    FloatingActionButton(
+                    val isPremium = currentUser != null && currentUser!!.uid.isNotEmpty() // TODO: Actually fetch tier here if needed, or just keep it simple
+                    
+                    ExtendedFloatingActionButton(
                         onClick = { showCaptureOptions = true },
                         containerColor = Color(0xFF2D6A4F),
                         contentColor = Color.White,
-                        shape = CircleShape,
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Capture")
-                    }
+                        shape = RoundedCornerShape(16.dp),
+                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        text = { Text("Capture", fontWeight = FontWeight.Bold) }
+                    )
                 }
             }
         ) { paddingValues ->
@@ -150,7 +213,7 @@ fun RemindlyNavigation(
                 composable("onboarding") {
                     OnboardingScreen(
                         onFinished = {
-                            val destination = if (currentUser == null) "signUp" else "home"
+                            val destination = if (currentUser == null) "signIn" else "home"
                             navController.navigate(destination) {
                                 popUpTo("onboarding") { inclusive = true }
                             }
@@ -158,20 +221,38 @@ fun RemindlyNavigation(
                     )
                 }
                 composable("signUp") {
-                SignUpScreen(
-                    onNavigateToSignIn = { navController.navigate("signIn") },
-                    onSignUpSuccess = { 
-                        navController.navigate("home") {
-                            popUpTo("signUp") { inclusive = true }
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    SignUpScreen(
+                        onNavigateToSignIn = { navController.popBackStack() },
+                        onSignUpSuccess = { 
+                            SyncDownWorker.schedule(context)
+                            navController.navigate("paywall") {
+                                popUpTo("signUp") { inclusive = true }
+                            }
+                        },
+                        windowWidthSizeClass = windowWidthSizeClass
+                    )
+                }
+                composable("paywall") {
+                    SubscriptionPaywallSheet(
+                        onDismiss = {
+                            navController.navigate("home") {
+                                popUpTo("paywall") { inclusive = true }
+                            }
+                        },
+                        onPlanSelected = {
+                            navController.navigate("home") {
+                                popUpTo("paywall") { inclusive = true }
+                            }
                         }
-                    },
-                    windowWidthSizeClass = windowWidthSizeClass
-                )
-            }
+                    )
+                }
             composable("signIn") {
+                val context = androidx.compose.ui.platform.LocalContext.current
                 SignInScreen(
-                    onNavigateToSignUp = { navController.popBackStack() },
+                    onNavigateToSignUp = { navController.navigate("signUp") },
                     onSignInSuccess = {
+                        SyncDownWorker.schedule(context)
                         navController.navigate("home") {
                             popUpTo("signIn") { inclusive = true }
                         }
@@ -204,8 +285,13 @@ fun RemindlyNavigation(
                 arguments = listOf(navArgument("categoryName") { type = NavType.StringType })
             ) { backStackEntry ->
                 val categoryName = backStackEntry.arguments?.getString("categoryName") ?: ""
+                val decodedName = try {
+                    java.net.URLDecoder.decode(categoryName, "UTF-8")
+                } catch (_: Exception) {
+                    categoryName
+                }
                 CategoryDetailScreen(
-                    categoryName = categoryName,
+                    categoryName = decodedName,
                     onBack = { navController.popBackStack() },
                     onItemClick = { itemId -> navController.navigate("details/$itemId") }
                 )
@@ -213,6 +299,7 @@ fun RemindlyNavigation(
             composable("reminders") {
                 RemindersScreen(
                     windowWidthSizeClass = windowWidthSizeClass,
+                    initialSelectedDate = initialSelectedDate,
                     onNavigateToHome = { navController.navigate("home") },
                     onNavigateToInbox = { navController.navigate("inbox") },
                     onNavigateToProfile = { navController.navigate("profile") }
@@ -223,11 +310,14 @@ fun RemindlyNavigation(
                     windowWidthSizeClass = windowWidthSizeClass,
                     onSignOut = { 
                         scope.launch {
-                            authRepository.signOut()
-                            navController.navigate("signUp") {
+                            authRepository.signOut(clearData = true)
+                            navController.navigate("signIn") {
                                 popUpTo(0)
                             }
                         }
+                    },
+                    onShowWalkthrough = {
+                        showWalkthroughOverlay = true
                     }
                 )
             }
@@ -262,6 +352,8 @@ fun RemindlyNavigation(
             }
         }
     }
+}
+}
 
     if (showCaptureOptions) {
         CaptureOptionsBottomSheet(
@@ -281,6 +373,24 @@ fun RemindlyNavigation(
             }
         )
     }
-}
+
+    if (showProCelebration) {
+        com.victorkirui.module_features.home.ProCelebrationOverlay(
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    if (showWalkthroughOverlay) {
+        com.victorkirui.module_features.onboarding.FeatureWalkthroughOverlay(
+            onDismiss = {
+                showWalkthroughOverlay = false
+                scope.launch {
+                    onboardingRepository.setHasSeenHomeWalkthrough(true)
+                }
+                navController.navigate("paywall")
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 }

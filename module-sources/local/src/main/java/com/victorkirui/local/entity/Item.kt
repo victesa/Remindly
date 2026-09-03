@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 data class Item(
     @PrimaryKey
     val id: String,
+    val userId: String, // Scoping data to the user
     val title: String,
     val summary: String?,
     val category: String?,
@@ -19,6 +20,7 @@ data class Item(
     val extractedText: String? = null,
     val contentType: String = "TEXT",
     val metadata: Map<String, String>? = null,
+    val checklist: List<String>? = null,
     val createdAt: String,
     val status: String
 )

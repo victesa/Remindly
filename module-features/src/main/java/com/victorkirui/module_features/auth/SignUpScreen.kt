@@ -117,7 +117,7 @@ fun SignUpScreenContent(
     val isCompact = windowWidthSizeClass == WindowWidthSizeClass.Compact
     val isExpanded = windowWidthSizeClass == WindowWidthSizeClass.Expanded
 
-    Row(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         if (!isCompact) {
             SignUpBrandingPanel(
                 windowWidthSizeClass = windowWidthSizeClass,
@@ -405,22 +405,55 @@ private fun SignUpForm(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        Text(
-            text = buildAnnotatedString {
+        val context = LocalContext.current
+        val annotatedTermsString = remember {
+            buildAnnotatedString {
                 append("By signing up, you agree to our ")
+                
+                pushStringAnnotation(
+                    tag = "TERMS",
+                    annotation = "https://victor-kirui.dev/remindly/terms"
+                )
                 withStyle(SpanStyle(color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)) {
                     append("Terms of Service")
                 }
+                pop()
+
                 append(" and ")
+
+                pushStringAnnotation(
+                    tag = "PRIVACY",
+                    annotation = "https://victor-kirui.dev/remindly/privacy-policy"
+                )
                 withStyle(SpanStyle(color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)) {
                     append("Privacy Policy")
                 }
+                pop()
+
                 append(".")
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.Gray,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
+            }
+        }
+
+        androidx.compose.foundation.text.ClickableText(
+            text = annotatedTermsString,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = Color.Gray,
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { offset ->
+                annotatedTermsString.getStringAnnotations(offset, offset).firstOrNull()?.let { annotation ->
+                    try {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(annotation.item)
+                        )
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Opening link...", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         )
         
         Spacer(modifier = Modifier.height(if (isExpanded) 48.dp else 32.dp))

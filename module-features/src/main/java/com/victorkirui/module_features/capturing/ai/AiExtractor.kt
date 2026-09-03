@@ -8,6 +8,7 @@ interface AiExtractor {
 
 data class AiInput(
     val text: String?,
+    val url: String? = null,
     val mediaUri: Uri?,
     val contentType: String,
     val idempotencyKey: String
@@ -15,6 +16,7 @@ data class AiInput(
 
 sealed class AiResult {
     data class Success(
+        val id: String? = null,
         val title: String,
         val summary: String?,
         val category: String,
@@ -22,7 +24,11 @@ sealed class AiResult {
         val eventDate: String?,
         val organization: String?,
         val strategy: String,
+        val checklist: List<String>? = null,
         val isReplayed: Boolean = false
     ) : AiResult()
-    data class Error(val message: String) : AiResult()
+    data class Error(
+        val message: String,
+        val isTransient: Boolean = false
+    ) : AiResult()
 }

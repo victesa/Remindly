@@ -17,7 +17,9 @@ Remindly is a modern, AI-powered Android application designed to help you captur
 - **Multi-Modal AI Capture**: Capture content via shared text, images (OCR powered by ML Kit), or PDF documents.
 - **Intelligent Data Extraction**: Custom AI backend (Cloudflare Workers + Gemini) extracts titles, summaries, deadlines, and organizations automatically.
 - **Smart Reminders**: Automatically schedules a sequence of notifications (7 days before, 2 days before, morning of) based on extracted deadlines using `AlarmManager`.
+- **Daily Morning Briefings**: Configurable daily briefings scheduled with exact precision via `AlarmManager` at your preferred time (with dynamic 12-hour AM/PM formatting).
 - **Offline-First Architecture**: View and capture content without an internet connection. Data is synced automatically when connectivity returns via `WorkManager`.
+- **Resilient AI Networking**: Custom OkHttp interceptors handling Cloudflare Access authentication, HTML response guarding, and unwrapping stringified JSON payloads.
 - **Responsive Design**: Optimized UI for different screen sizes (Compact, Medium, Expanded) using Jetpack Compose `WindowSizeClass`.
 - **Secure Authentication**: Firebase Auth with support for Google Sign-In and Email/Password.
 
@@ -53,6 +55,11 @@ Remindly is a modern, AI-powered Android application designed to help you captur
     WEB_CLIENT_ID=your_web_client_id_here
     ```
 4.  **Build**: Open in Android Studio and run the `:app` module.
+
+## Privacy & Legal
+
+- [Privacy Policy](PRIVACY_POLICY.md)
+- [Terms and Conditions](TERMS_AND_CONDITIONS.md)
 
 ## License
 

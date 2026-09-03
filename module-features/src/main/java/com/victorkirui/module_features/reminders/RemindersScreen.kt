@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
@@ -55,6 +56,7 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun RemindersScreen(
     windowWidthSizeClass: WindowWidthSizeClass,
+    initialSelectedDate: String? = null,
     onNavigateToHome: () -> Unit = {},
     onNavigateToInbox: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
@@ -63,6 +65,21 @@ fun RemindersScreen(
     val uiState by viewModel.uiState.collectAsState()
     val selectedDate by viewModel.selectedDate.collectAsState()
     val currentMonth by viewModel.currentMonth.collectAsState()
+
+    LaunchedEffect(initialSelectedDate) {
+        if (initialSelectedDate != null) {
+            try {
+                val parsedDate = if (initialSelectedDate.contains("T")) {
+                    java.time.LocalDateTime.parse(initialSelectedDate.substringBefore("Z")).toLocalDate()
+                } else {
+                    LocalDate.parse(initialSelectedDate)
+                }
+                viewModel.onDateSelected(parsedDate)
+            } catch (e: Exception) {
+                android.util.Log.e("RemindersScreen", "Failed to parse initial date: $initialSelectedDate", e)
+            }
+        }
+    }
 
     RemindersScreenContent(
         uiState = uiState,
@@ -92,7 +109,11 @@ fun RemindersScreenContent(
 ) {
     val isLargeScreen = windowWidthSizeClass == WindowWidthSizeClass.Expanded
 
-    Row(modifier = Modifier.fillMaxSize().background(Color.White)) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
         if (isLargeScreen) {
             RemindlyNavigationRail(
                 currentScreen = "Reminders",
@@ -112,14 +133,14 @@ fun RemindersScreenContent(
                                 "Reminders",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 24.sp,
-                                color = Color.Black
+                                color = MaterialTheme.colorScheme.onSurface
                             ) 
                         },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
                     )
                 }
             },
-            containerColor = Color.White
+            containerColor = MaterialTheme.colorScheme.background
         ) { innerPadding ->
             when (val state = uiState) {
                 RemindersUiState.Loading -> {
@@ -266,7 +287,8 @@ fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: Local
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAF9))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
             modifier = Modifier
@@ -283,14 +305,14 @@ fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: Local
                 Text(
                     monthName,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp
                 )
                 Text(
                     dayOfMonth,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 24.sp
                 )
             }
@@ -303,7 +325,7 @@ fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: Local
                     .fillMaxHeight()
                     .padding(vertical = 8.dp),
                 thickness = 1.dp,
-                color = Color.LightGray.copy(alpha = 0.3f)
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -315,21 +337,21 @@ fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: Local
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     maxLines = 1,
-                    color = Color.Black
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 Spacer(modifier = Modifier.height(6.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = Color(0xFFF0F0F0),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
                             item.category ?: "Capture",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -338,14 +360,14 @@ fun SimpleItemCard(item: com.victorkirui.local.entity.Item, referenceDate: Local
 
             if (daysLeft >= 0) {
                 Surface(
-                    color = if (daysLeft <= 3) Color(0xFFC0392B) else Color(0xFF2D6A4F),
+                    color = if (daysLeft <= 3) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
                         text = if (daysLeft == 0L) "Today" else "$daysLeft d",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -362,7 +384,7 @@ fun LargeScreenRemindersLayout(
     onDateSelected: (LocalDate) -> Unit,
     onMonthChanged: (YearMonth) -> Unit
 ) {
-    Row(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         // Master Pane (Calendar)
         Column(
             modifier = Modifier
@@ -516,7 +538,7 @@ fun CalendarView(
         Dialog(onDismissRequest = { showDatePicker = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
                 modifier = Modifier
                     .width(340.dp)
@@ -531,16 +553,16 @@ fun CalendarView(
                         title = null,
                         headline = null,
                         colors = DatePickerDefaults.colors(
-                            containerColor = Color.White,
-                            selectedDayContainerColor = Evergreen,
-                            selectedDayContentColor = Color.White,
-                            todayContentColor = Evergreen,
-                            todayDateBorderColor = Evergreen,
-                            weekdayContentColor = Color.Gray,
-                            dayContentColor = DarkPine,
-                            navigationContentColor = DarkPine,
-                            selectedYearContainerColor = Evergreen,
-                            selectedYearContentColor = Color.White
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            selectedDayContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedDayContentColor = MaterialTheme.colorScheme.onPrimary,
+                            todayContentColor = MaterialTheme.colorScheme.primary,
+                            todayDateBorderColor = MaterialTheme.colorScheme.primary,
+                            weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            dayContentColor = MaterialTheme.colorScheme.onSurface,
+                            navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                            selectedYearContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedYearContentColor = MaterialTheme.colorScheme.onPrimary
                         ),
                         modifier = Modifier.scale(0.9f) // Scale down slightly to look better
                     )
@@ -552,7 +574,7 @@ fun CalendarView(
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = { showDatePicker = false }) {
-                            Text("Cancel", color = MutedSage)
+                            Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         TextButton(onClick = {
@@ -562,7 +584,7 @@ fun CalendarView(
                             }
                             showDatePicker = false
                         }) {
-                            Text("Confirm", color = Evergreen, fontWeight = FontWeight.ExtraBold)
+                            Text("Confirm", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
@@ -778,7 +800,8 @@ fun UpcomingReminderCard(reminderWithItem: ReminderWithItem, referenceDate: Loca
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAF9))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
             modifier = Modifier
@@ -795,14 +818,14 @@ fun UpcomingReminderCard(reminderWithItem: ReminderWithItem, referenceDate: Loca
                 Text(
                     monthName,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp
                 )
                 Text(
                     dayOfMonth.toString(),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2D6A4F),
+                    color = MaterialTheme.colorScheme.primary,
                     fontSize = 24.sp
                 )
             }
@@ -815,7 +838,7 @@ fun UpcomingReminderCard(reminderWithItem: ReminderWithItem, referenceDate: Loca
                     .fillMaxHeight()
                     .padding(vertical = 8.dp),
                 thickness = 1.dp,
-                color = Color.LightGray.copy(alpha = 0.3f)
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -826,69 +849,48 @@ fun UpcomingReminderCard(reminderWithItem: ReminderWithItem, referenceDate: Loca
                     reminderWithItem.item.title,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    maxLines = 1,
-                    color = Color.Black
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 Spacer(modifier = Modifier.height(6.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = Color(0xFFEAF2EE),
+                        color = MaterialTheme.colorScheme.primaryContainer,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
                             reminderWithItem.item.category ?: "Other",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF2D6A4F),
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Medium
                         )
                     }
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    val sourceIcon = when (reminderWithItem.item.source?.lowercase()) {
-                        "linkedin" -> R.drawable.ic_linkedin
-                        "gmail" -> R.drawable.ic_gmail
-                        else -> null
-                    }
-                    
-                    if (sourceIcon != null) {
-                        Icon(
-                            painter = painterResource(id = sourceIcon),
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = Color.Unspecified
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Link,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = Color.Gray
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        "from ${reminderWithItem.item.source ?: "Unknown"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
                 }
+            }
+
+            IconButton(onClick = { /* Navigate to details */ }) {
+                Icon(
+                    Icons.Default.CalendarToday,
+                    contentDescription = "Sync",
+                    tint = Color(0xFF4285F4),
+                    modifier = Modifier.size(18.dp)
+                )
             }
 
             if (daysLeft >= 0) {
                 Surface(
-                    color = Color(0xFFC0392B),
+                    color = MaterialTheme.colorScheme.error,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
                         text = if (daysLeft == 0L) "Today" else "$daysLeft ${if (daysLeft == 1L) "day" else "days"} left",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onError,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -908,7 +910,8 @@ fun LargeReminderCard(reminderWithItem: ReminderWithItem) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAF9))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
             modifier = Modifier.padding(24.dp)
@@ -923,28 +926,28 @@ fun LargeReminderCard(reminderWithItem: ReminderWithItem) {
                         text = dayOfMonth.toString(),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2D6A4F),
+                        color = MaterialTheme.colorScheme.primary,
                         fontSize = 28.sp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = monthName,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
 
                 if (daysLeft >= 0) {
                     Surface(
-                        color = if (isUrgent) Color(0xFFC0392B) else Color(0xFFEAF2EE),
+                        color = if (isUrgent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primaryContainer,
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Text(
                             text = if (daysLeft == 0L) "Today" else "$daysLeft ${if (daysLeft == 1L) "day" else "days"} left",
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isUrgent) Color.White else Color(0xFF2D6A4F),
+                            color = if (isUrgent) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -957,9 +960,9 @@ fun LargeReminderCard(reminderWithItem: ReminderWithItem) {
                 text = reminderWithItem.item.title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.Black,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 fontSize = 24.sp
             )
 
@@ -971,48 +974,17 @@ fun LargeReminderCard(reminderWithItem: ReminderWithItem) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    color = Color(0xFF2D6A4F),
+                    color = MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
                         reminderWithItem.item.category ?: "Other",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 20.sp
                     )
-                }
-
-                val sourceIcon = when (reminderWithItem.item.source?.lowercase()) {
-                    "linkedin" -> R.drawable.ic_linkedin
-                    "gmail" -> R.drawable.ic_gmail
-                    "whatsapp" -> Icons.Default.ChatBubbleOutline
-                    else -> Icons.Default.Link
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.White),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (sourceIcon is Int) {
-                        Icon(
-                            painter = painterResource(id = sourceIcon),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Color.Unspecified
-                        )
-                    } else {
-                        Icon(
-                            imageVector = sourceIcon as ImageVector,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Color.Gray
-                        )
-                    }
                 }
             }
         }
@@ -1023,7 +995,7 @@ fun LargeReminderCard(reminderWithItem: ReminderWithItem) {
 @Composable
 fun RemindersMobilePreview() {
     val sampleItem1 = com.victorkirui.local.entity.Item(
-        id = "1", title = "Interview — Spotify London", summary = null, category = "Job",
+        id = "1", userId = "sample", title = "Interview — Spotify London", summary = null, category = "Job",
         deadline = "2025-06-24", eventDate = null, source = "LinkedIn", createdAt = "", status = ""
     )
     val sampleReminder1 = com.victorkirui.local.entity.Reminder(
@@ -1031,7 +1003,7 @@ fun RemindersMobilePreview() {
     )
 
     val sampleItem2 = com.victorkirui.local.entity.Item(
-        id = "2", title = "Scholarship Application Deadline", summary = null, category = "Scholarship",
+        id = "2", userId = "sample", title = "Scholarship Application Deadline", summary = null, category = "Scholarship",
         deadline = "2025-06-25", eventDate = null, source = "Gmail", createdAt = "", status = ""
     )
     val sampleReminder2 = com.victorkirui.local.entity.Reminder(
@@ -1066,7 +1038,7 @@ fun RemindersMobilePreview() {
 @Composable
 fun RemindersLargeScreenPreview() {
     val sampleItem1 = com.victorkirui.local.entity.Item(
-        id = "1", title = "Interview — Spotify London", summary = null, category = "Job",
+        id = "1", userId = "sample", title = "Interview — Spotify London", summary = null, category = "Job",
         deadline = "2025-06-24", eventDate = null, source = "LinkedIn", createdAt = "", status = ""
     )
     val sampleReminder1 = com.victorkirui.local.entity.Reminder(
@@ -1074,7 +1046,7 @@ fun RemindersLargeScreenPreview() {
     )
     
     val sampleItem2 = com.victorkirui.local.entity.Item(
-        id = "2", title = "Scholarship Application Deadline", summary = null, category = "Scholarship",
+        id = "2", userId = "sample", title = "Scholarship Application Deadline", summary = null, category = "Scholarship",
         deadline = "2025-06-25", eventDate = null, source = "Gmail", createdAt = "", status = ""
     )
     val sampleReminder2 = com.victorkirui.local.entity.Reminder(
@@ -1082,7 +1054,7 @@ fun RemindersLargeScreenPreview() {
     )
 
     val sampleItem3 = com.victorkirui.local.entity.Item(
-        id = "3", title = "Google Internship Deadline", summary = null, category = "Job",
+        id = "3", userId = "sample", title = "Google Internship Deadline", summary = null, category = "Job",
         deadline = "2025-06-26", eventDate = null, source = "LinkedIn", createdAt = "", status = ""
     )
     val sampleReminder3 = com.victorkirui.local.entity.Reminder(
@@ -1090,7 +1062,7 @@ fun RemindersLargeScreenPreview() {
     )
 
     val sampleItem4 = com.victorkirui.local.entity.Item(
-        id = "4", title = "AI Hackathon — DevCircle", summary = null, category = "Event",
+        id = "4", userId = "sample", title = "AI Hackathon — DevCircle", summary = null, category = "Event",
         deadline = "2025-07-01", eventDate = null, source = "WhatsApp", createdAt = "", status = ""
     )
     val sampleReminder4 = com.victorkirui.local.entity.Reminder(
@@ -1098,7 +1070,7 @@ fun RemindersLargeScreenPreview() {
     )
 
     val sampleItem5 = com.victorkirui.local.entity.Item(
-        id = "5", title = "Flight to Amsterdam", summary = null, category = "Travel",
+        id = "5", userId = "sample", title = "Flight to Amsterdam", summary = null, category = "Travel",
         deadline = "2025-07-12", eventDate = null, source = "Gmail", createdAt = "", status = ""
     )
     val sampleReminder5 = com.victorkirui.local.entity.Reminder(

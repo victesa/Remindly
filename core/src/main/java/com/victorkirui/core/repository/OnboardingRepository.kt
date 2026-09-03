@@ -11,19 +11,32 @@ private val Context.onboardingDataStore by preferencesDataStore(name = "onboardi
 
 interface OnboardingRepository {
     val hasSeenOnboarding: Flow<Boolean>
+    val hasSeenHomeWalkthrough: Flow<Boolean>
     suspend fun setHasSeenOnboarding(hasSeen: Boolean)
+    suspend fun setHasSeenHomeWalkthrough(hasSeen: Boolean)
 }
 
 class OnboardingRepositoryImpl(private val context: Context) : OnboardingRepository {
     private val HAS_SEEN_ONBOARDING_KEY = booleanPreferencesKey("has_seen_onboarding")
+    private val HAS_SEEN_WALKTHROUGH_KEY = booleanPreferencesKey("has_seen_home_walkthrough")
 
     override val hasSeenOnboarding: Flow<Boolean> = context.onboardingDataStore.data.map { preferences ->
         preferences[HAS_SEEN_ONBOARDING_KEY] ?: false
     }
 
+    override val hasSeenHomeWalkthrough: Flow<Boolean> = context.onboardingDataStore.data.map { preferences ->
+        preferences[HAS_SEEN_WALKTHROUGH_KEY] ?: false
+    }
+
     override suspend fun setHasSeenOnboarding(hasSeen: Boolean) {
         context.onboardingDataStore.edit { preferences ->
             preferences[HAS_SEEN_ONBOARDING_KEY] = hasSeen
+        }
+    }
+
+    override suspend fun setHasSeenHomeWalkthrough(hasSeen: Boolean) {
+        context.onboardingDataStore.edit { preferences ->
+            preferences[HAS_SEEN_WALKTHROUGH_KEY] = hasSeen
         }
     }
 }

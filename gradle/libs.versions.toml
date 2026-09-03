@@ -16,15 +16,25 @@ navigationCompose = "2.8.8"
 viewModelVersion = "2.10.0"
 coilVersion = "2.6.0"
 dataStoreVersion = "1.1.3"
-ksp = "2.3.5"
+ksp = "2.2.10-2.0.2"
 desugar_jdk_libs = "2.1.4"
 workManagerVersion = "2.11.1"
 mlkitTextRecognition = "19.0.1"
 coroutinesPlayServices = "1.9.0"
 playServicesAuth = "21.3.0"
 googleGenerativeAi = "0.9.0"
+firebaseCrashlyticsPlugin = "3.0.3"
+googleServicesPlugin = "4.4.2"
+appFunctions = "1.0.0-alpha10"
+playBilling = "7.1.1"
+glanceVersion = "1.2.0"
 
 [libraries]
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glanceVersion" }
+androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glanceVersion" }
+play-billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "playBilling" }
+androidx-appfunctions = { group = "androidx.appfunctions", name = "appfunctions", version.ref = "appFunctions" }
+androidx-appfunctions-compiler = { group = "androidx.appfunctions", name = "appfunctions-compiler", version.ref = "appFunctions" }
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
 google-generative-ai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "googleGenerativeAi" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutinesPlayServices" }
@@ -67,6 +77,10 @@ material = { group = "com.google.android.material", name = "material", version.r
 #Navigation
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManagerVersion" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version = "34.17.0" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 
 #Retrofit
 retrofit-core = { group = "com.squareup.retrofit2", name = "retrofit", version = "2.9.0" }
@@ -80,4 +94,6 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+gms-google-services = { id = "com.google.gms.google-services", version.ref = "googleServicesPlugin" }
+firebase-crashlytics-plugin = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }
 

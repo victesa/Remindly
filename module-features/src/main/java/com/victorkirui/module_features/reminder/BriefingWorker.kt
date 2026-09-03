@@ -19,10 +19,16 @@ class BriefingWorker(
 ) : CoroutineWorker(context, workerParams), KoinComponent {
 
     private val localRepository: LocalRepository by inject()
+    private val authRepository: com.victorkirui.core.repository.AuthRepository by inject()
     private val notificationHelper: NotificationHelper by inject()
     private val settingsRepository: ReminderSettingsRepository by inject()
 
     override suspend fun doWork(): Result {
+        val userId = authRepository.currentUser.value?.uid ?: return Result.failure()
+        
+        // Periodic Cleanup
+        localRepository.deleteExpiredItems(userId)
+
         val isEnabled = settingsRepository.isMorningBriefingEnabled.first()
         if (!isEnabled) {
             android.util.Log.d("BriefingWorker", "Morning briefing is disabled in settings.")
@@ -30,7 +36,7 @@ class BriefingWorker(
         }
 
         val today = LocalDate.now()
-        val remindersToday = localRepository.getAllRemindersWithItems().first().filter {
+        val remindersToday = localRepository.getAllRemindersWithItems(userId).first().filter {
             try {
                 val reminderDate = LocalDateTime.parse(it.reminder.reminderDateTime).toLocalDate()
                 reminderDate.isEqual(today) && it.item.status != "DONE"
@@ -41,23 +47,24 @@ class BriefingWorker(
 
         if (remindersToday.isNotEmpty()) {
             val count = remindersToday.size
-            val message = if (count == 1) {
-                "You have 1 thing needing attention today: ${remindersToday.first().item.title}"
+            val (title, message) = if (count == 1) {
+                "Today's Goal" to "You have one item needing your attention today: ${remindersToday.first().item.title}. You've got this!"
             } else {
-                "You have $count things needing attention today."
+                "Daily Briefing" to "You have $count things lined up for today. Try to work on them before their deadlines."
             }
-            notificationHelper.showNotification("Morning Briefing", message)
+            // Use a fixed notification ID for briefings so they replace each other
+            notificationHelper.showNotification(title, message, notificationId = 1001)
             android.util.Log.d("BriefingWorker", "Sent morning briefing with $count items.")
         } else {
             val engagementMessages = listOf(
-                "Your schedule is clear! It’s a great time to explore new opportunities and capture them in Remindly.",
+                "Your schedule is clear! It’s a great time to explore new opportunities.",
                 "No deadlines today. Why not take a few minutes to organize your upcoming goals?",
-                "A clear day ahead! Remember to share interesting job posts or events to Remindly so you don't forget them.",
-                "Nothing on the list for today. Spend some time searching for your next big thing and let Remindly handle the reminders."
+                "A clear day ahead! Keep sharing interesting captures with Remindly.",
+                "Nothing on the list for today. Spend some time searching for your next big thing."
             )
             val randomMessage = engagementMessages.random()
-            notificationHelper.showNotification("Plan Your Day", randomMessage)
-            android.util.Log.d("BriefingWorker", "Sent engagement notification as there were no reminders.")
+            notificationHelper.showNotification("Plan Your Day", randomMessage, notificationId = 1001)
+            android.util.Log.d("BriefingWorker", "Sent engagement notification.")
         }
 
         return Result.success()
@@ -68,14 +75,21 @@ class BriefingWorker(
 
         fun schedule(context: Context, preferredTime: LocalTime) {
             val now = LocalTime.now()
-            var delay = java.time.Duration.between(now, preferredTime).toMinutes()
-            if (delay < 0) delay += 24 * 60
+            var delayMinutes = java.time.Duration.between(now, preferredTime).toMinutes()
+            
+            // If the time has already passed today, schedule for tomorrow
+            if (delayMinutes <= 0) {
+                delayMinutes += 24 * 60
+            }
+
+            android.util.Log.d("BriefingWorker", "Scheduling morning briefing in $delayMinutes minutes (at $preferredTime)")
 
             val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                 .build()
 
             val workRequest = PeriodicWorkRequestBuilder<BriefingWorker>(24, TimeUnit.HOURS)
-                .setInitialDelay(delay, TimeUnit.MINUTES)
+                .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
 
@@ -84,6 +98,10 @@ class BriefingWorker(
                 ExistingPeriodicWorkPolicy.UPDATE,
                 workRequest
             )
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
         }
     }
 }

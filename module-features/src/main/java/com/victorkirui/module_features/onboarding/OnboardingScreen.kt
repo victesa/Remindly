@@ -1,66 +1,58 @@
 package com.victorkirui.module_features.onboarding
 
-import androidx.compose.animation.*
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.NotificationsActive
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.victorkirui.core.ui.theme.RemindlyTheme
+import com.victorkirui.core.R
+import com.victorkirui.core.ui.theme.*
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
 data class OnboardingPage(
     val title: String,
     val description: String,
-    val icon: ImageVector,
-    val color: Color
+    @DrawableRes val imageRes: Int,
 )
 
 val onboardingPages = listOf(
     OnboardingPage(
         title = "Capture Anything",
-        description = "Share job posts, screenshots, or PDFs directly to Remindly from any app. We'll handle the rest.",
-        icon = Icons.Outlined.Share,
-        color = Color(0xFF2D6A4F)
+        description = "Share links, job posts, or text from any app directly to Remindly. We'll handle the extraction for you.",
+        imageRes = R.drawable.capture_anything
     ),
     OnboardingPage(
-        title = "AI-Powered Analysis",
-        description = "Our AI automatically extracts deadlines, companies, and summaries so you don't have to type a thing.",
-        icon = Icons.Outlined.AutoAwesome,
-        color = Color(0xFF40916C)
+        title = "AI Handles Anything",
+        description = "Our intelligent AI automatically identifies deadlines, companies, and summaries so you don't have to type a thing.",
+        imageRes = R.drawable.ai
     ),
     OnboardingPage(
-        title = "Smart Reminders",
-        description = "Get intelligent countdown alerts (7 days, 2 days, and morning of) so you never miss an application again.",
-        icon = Icons.Outlined.NotificationsActive,
-        color = Color(0xFF52B788)
+        title = "Never Miss a Schedule",
+        description = "Receive proactive notifications and countdown alerts. Stay ahead of your deadlines with smart scheduling.",
+        imageRes = R.drawable.deadline
     ),
     OnboardingPage(
-        title = "Offline First",
-        description = "Save captures even without internet. Remindly will sync everything once you're back online.",
-        icon = Icons.Outlined.CloudSync,
-        color = Color(0xFF74C69D)
+        title = "Your Opportunity Pipeline",
+        description = "A centralized hub for all your captured opportunities. Organize, track, and never let a chance slip away.",
+        imageRes = R.drawable.pipeline
     )
 )
 
@@ -83,39 +75,99 @@ fun OnboardingScreenContent(
     val pagerState = rememberPagerState(pageCount = { onboardingPages.size })
     val scope = rememberCoroutineScope()
 
-    Scaffold(
-        containerColor = Color.White,
-        bottomBar = {
-            OnboardingBottomBar(
-                currentPage = pagerState.currentPage,
-                pageCount = onboardingPages.size,
-                onNext = {
-                    if (pagerState.currentPage < onboardingPages.size - 1) {
-                        scope.launch {
-                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                        }
-                    } else {
-                        onCompleteOnboarding()
-                        onFinished()
-                    }
-                },
-                onSkip = {
-                    onCompleteOnboarding()
-                    onFinished()
-                }
-            )
-        }
-    ) { padding ->
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = FreshSnow
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .statusBarsPadding()
+                .navigationBarsPadding()
         ) {
+            // App Logo
+            Text(
+                text = "Remindly",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                ),
+                color = Evergreen,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 32.dp),
+                softWrap = false,
+                maxLines = 1
+            )
+
+            // Pager Section
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.Top
             ) { index ->
                 OnboardingPageContent(onboardingPages[index])
+            }
+
+            // Bottom Navigation Section
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Indicators
+                Row(
+                    modifier = Modifier.padding(bottom = 32.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    repeat(onboardingPages.size) { index ->
+                        val isSelected = index == pagerState.currentPage
+                        val width by animateDpAsState(
+                            targetValue = if (isSelected) 24.dp else 8.dp,
+                            label = "width"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(8.dp)
+                                .width(width)
+                                .clip(CircleShape)
+                                .background(if (isSelected) Evergreen else PaleSage)
+                        )
+                    }
+                }
+
+                // Primary Button
+                Button(
+                    onClick = {
+                        if (pagerState.currentPage < onboardingPages.size - 1) {
+                            scope.launch {
+                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                            }
+                        } else {
+                            onCompleteOnboarding()
+                            onFinished()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Evergreen,
+                        contentColor = FreshSnow
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                ) {
+                    Text(
+                        text = if (pagerState.currentPage == onboardingPages.size - 1) "Get Started" else "Continue",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -124,99 +176,61 @@ fun OnboardingScreenContent(
 @Composable
 fun OnboardingPageContent(page: OnboardingPage) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            modifier = Modifier.size(200.dp),
-            shape = CircleShape,
-            color = page.color.copy(alpha = 0.1f)
+        // Image Container - Large and centered at the top area
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 20.dp) 
+                .height(350.dp), 
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = page.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(100.dp),
-                    tint = page.color
-                )
-            }
+            Image(
+                painter = painterResource(id = page.imageRes),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        // Push text down - This fulfills "Push down the texts" while keeping image at top
+        Spacer(modifier = Modifier.weight(1f))
 
-        Text(
-            text = page.title,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black,
-            textAlign = TextAlign.Center
-        )
+        // Text Content - Stretched with alignment
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+                .padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = page.title,
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 30.sp,
+                    lineHeight = 38.sp,
+                    letterSpacing = (-0.5).sp
+                ),
+                color = DarkPine,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = page.description,
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color.Gray,
-            textAlign = TextAlign.Center,
-            lineHeight = 24.sp
-        )
-    }
-}
-
-@Composable
-fun OnboardingBottomBar(
-    currentPage: Int,
-    pageCount: Int,
-    onNext: () -> Unit,
-    onSkip: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(24.dp)
-            .navigationBarsPadding(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        // Pager Indicator
-        Row {
-            repeat(pageCount) { index ->
-                Box(
-                    modifier = Modifier
-                        .padding(4.dp)
-                        .size(width = if (index == currentPage) 24.dp else 8.dp, height = 8.dp)
-                        .clip(CircleShape)
-                        .background(if (index == currentPage) Color(0xFF2D6A4F) else Color.LightGray)
-                )
-            }
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (currentPage < pageCount - 1) {
-                TextButton(onClick = onSkip) {
-                    Text("Skip", color = Color.Gray)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            
-            Button(
-                onClick = onNext,
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F))
-            ) {
-                Text(
-                    text = if (currentPage == pageCount - 1) "Get Started" else "Next",
-                    fontWeight = FontWeight.Bold
-                )
-                if (currentPage < pageCount - 1) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
-                }
-            }
+            Text(
+                text = page.description,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = MutedSage,
+                    lineHeight = 24.sp,
+                    fontSize = 16.sp
+                ),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

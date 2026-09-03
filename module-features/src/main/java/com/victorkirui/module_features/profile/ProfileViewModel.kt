@@ -2,41 +2,43 @@ package com.victorkirui.module_features.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.victorkirui.core.notification.NotificationHelper
 import com.victorkirui.core.repository.AuthRepository
 import com.victorkirui.core.repository.ReminderSettingsRepository
-import com.victorkirui.core.repository.ThemeRepository
-import com.victorkirui.local.entity.Item
-import com.victorkirui.local.repository.LocalRepository
-import com.victorkirui.module_features.reminder.ReminderScheduler
+import com.victorkirui.core.repository.SubscriptionRepository
+import com.victorkirui.core.repository.SubscriptionTier
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import com.victorkirui.module_features.reminder.BriefingWorker
 import org.koin.core.component.KoinComponent
-import java.time.LocalDateTime
 import java.time.LocalTime
 
 class ProfileViewModel(
     private val settingsRepository: ReminderSettingsRepository,
-    private val themeRepository: ThemeRepository,
+    private val subscriptionRepository: SubscriptionRepository,
     private val authRepository: AuthRepository,
-    private val notificationHelper: NotificationHelper,
-    private val reminderScheduler: ReminderScheduler,
-    private val localRepository: LocalRepository
+    private val reminderScheduler: com.victorkirui.module_features.reminder.ReminderScheduler
 ) : ViewModel(), KoinComponent {
 
     val uiState: StateFlow<ProfileUiState> = combine(
         settingsRepository.preferredReminderTime,
         settingsRepository.isMorningBriefingEnabled,
         settingsRepository.isDeadlineAlertsEnabled,
-        themeRepository.isDarkTheme,
-        authRepository.currentUser
+        settingsRepository.deadlineAlertLeadTimeHours,
+        authRepository.currentUser,
+        subscriptionRepository.subscriptionTier,
+        subscriptionRepository.quotaLimit,
+        subscriptionRepository.remainingQuota,
+        subscriptionRepository.isCalendarSyncEnabled
     ) { args ->
         val time = args[0] as String
         val morningBriefing = args[1] as Boolean
         val deadlineAlerts = args[2] as Boolean
-        val isDark = args[3] as Boolean?
+        val leadTime = args[3] as Int
         val user = args[4] as com.google.firebase.auth.FirebaseUser?
+        val tier = args[5] as SubscriptionTier
+        val limit = args[6] as Int
+        val remaining = args[7] as Int
+        val calendarSync = args[8] as Boolean
 
         ProfileUiState(
             userName = user?.displayName ?: "User",
@@ -44,7 +46,11 @@ class ProfileViewModel(
             preferredReminderTime = time,
             isMorningBriefingEnabled = morningBriefing,
             isDeadlineAlertsEnabled = deadlineAlerts,
-            isDarkTheme = isDark
+            deadlineAlertLeadTimeHours = leadTime,
+            subscriptionTier = tier,
+            isCalendarSyncEnabled = calendarSync,
+            quotaLimit = limit,
+            quotaRemaining = remaining
         )
     }.stateIn(
         scope = viewModelScope,
@@ -55,13 +61,12 @@ class ProfileViewModel(
     fun updateReminderTime(time: String) {
         viewModelScope.launch {
             settingsRepository.setPreferredReminderTime(time)
-            // Reschedule briefing worker with new time
+            // Reschedule daily briefing via ReminderScheduler and cancel legacy WorkManager job
             try {
                 val preferredTime = LocalTime.parse(time)
-                BriefingWorker.schedule(
-                    org.koin.core.context.GlobalContext.get().get(),
-                    preferredTime
-                )
+                reminderScheduler.scheduleDailyBriefing(preferredTime)
+                val context: android.content.Context = org.koin.core.context.GlobalContext.get().get()
+                androidx.work.WorkManager.getInstance(context).cancelUniqueWork("MorningBriefingWork")
             } catch (e: Exception) {
                 android.util.Log.e("ProfileViewModel", "Failed to reschedule briefing", e)
             }
@@ -80,33 +85,31 @@ class ProfileViewModel(
         }
     }
 
-    fun setDarkTheme(enabled: Boolean?) {
+    fun setDeadlineAlertLeadTime(hours: Int) {
         viewModelScope.launch {
-            themeRepository.setDarkTheme(enabled)
+            settingsRepository.setDeadlineAlertLeadTimeHours(hours)
         }
     }
 
-    fun sendTestNotification() {
-        notificationHelper.showNotification(
-            "Test Notification",
-            "This is an immediate test notification from Remindly!"
-        )
+    private val _deletionResult = MutableSharedFlow<Result<Unit>>()
+    val deletionResult = _deletionResult.asSharedFlow()
+
+    fun deleteAccount() {
+        viewModelScope.launch {
+            val result = authRepository.deleteAccount()
+            _deletionResult.emit(result)
+        }
     }
 
-    fun scheduleTestReminder() {
+    fun setSubscriptionTier(tier: SubscriptionTier) {
         viewModelScope.launch {
-            val dummyItem = Item(
-                id = "test_item_${System.currentTimeMillis()}",
-                title = "Test Scheduled Reminder",
-                summary = "Checking if Alarms work correctly",
-                category = "Test",
-                deadline = java.time.LocalDate.now().toString(),
-                eventDate = null,
-                createdAt = LocalDateTime.now().toString(),
-                status = "pending"
-            )
-            localRepository.saveItem(dummyItem)
-            reminderScheduler.scheduleRemindersForItem(dummyItem)
+            subscriptionRepository.setSubscriptionTier(tier)
+        }
+    }
+
+    fun toggleCalendarSync(enabled: Boolean) {
+        viewModelScope.launch {
+            subscriptionRepository.setCalendarSyncEnabled(enabled)
         }
     }
 }
@@ -117,5 +120,9 @@ data class ProfileUiState(
     val preferredReminderTime: String = "08:00 AM",
     val isMorningBriefingEnabled: Boolean = true,
     val isDeadlineAlertsEnabled: Boolean = true,
-    val isDarkTheme: Boolean? = null
+    val deadlineAlertLeadTimeHours: Int = 1,
+    val subscriptionTier: SubscriptionTier = SubscriptionTier.FREE,
+    val isCalendarSyncEnabled: Boolean = true,
+    val quotaLimit: Int = -1,
+    val quotaRemaining: Int = -1
 )

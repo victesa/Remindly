@@ -2,12 +2,13 @@ package com.victorkirui.module_features.details
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -24,9 +26,16 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.victorkirui.core.R
 import com.victorkirui.core.ui.theme.*
+import com.victorkirui.core.ui.component.RemindlyNavigationRail
+import com.victorkirui.core.ui.component.RemindlyBottomNavigation
+import com.victorkirui.core.util.DateUtils
 import com.victorkirui.local.entity.Item
 import com.victorkirui.local.entity.Reminder
+import com.victorkirui.module_features.capturing.SourceIcon
+import com.victorkirui.module_features.capturing.SourceIconProvider
 import org.koin.androidx.compose.koinViewModel
+import java.time.LocalDate
+import java.time.LocalTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,8 +51,77 @@ fun EditItemScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+
     LaunchedEffect(itemId) {
         viewModel.loadItem(itemId)
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            colors = DatePickerDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let {
+                        selectedDate = java.time.Instant.ofEpochMilli(it)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDate()
+                        showDatePicker = false
+                        showTimePicker = true
+                    }
+                }) { Text("Next", color = MaterialTheme.colorScheme.primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        ) {
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    selectedDayContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedDayContentColor = MaterialTheme.colorScheme.onPrimary,
+                    todayContentColor = MaterialTheme.colorScheme.primary,
+                    todayDateBorderColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    }
+
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState()
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateDeadline(
+                        selectedDate,
+                        LocalTime.of(timePickerState.hour, timePickerState.minute)
+                    )
+                    showTimePicker = false
+                }) { Text("Confirm", color = MaterialTheme.colorScheme.primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+            text = {
+                TimePicker(
+                    state = timePickerState,
+                    colors = TimePickerDefaults.colors(
+                        clockDialColor = MaterialTheme.colorScheme.surfaceVariant,
+                        selectorColor = MaterialTheme.colorScheme.primary,
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        )
     }
 
     when (windowWidthSizeClass) {
@@ -58,10 +136,11 @@ fun EditItemScreen(
                 onTitleChange = viewModel::onTitleChange,
                 onOrganizationChange = viewModel::onOrganizationChange,
                 onLocationChange = viewModel::onLocationChange,
-                onDeadlineChange = viewModel::onDeadlineChange,
+                onDeadlineClick = { showDatePicker = true },
                 onNotesChange = viewModel::onNotesChange,
                 onAddReminder = viewModel::addReminder,
                 onRemoveReminder = viewModel::removeReminder,
+                onRefreshReminders = viewModel::refreshReminders,
                 onSave = {
                     viewModel.saveChanges { onBack() }
                 }
@@ -78,10 +157,11 @@ fun EditItemScreen(
                 onTitleChange = viewModel::onTitleChange,
                 onOrganizationChange = viewModel::onOrganizationChange,
                 onLocationChange = viewModel::onLocationChange,
-                onDeadlineChange = viewModel::onDeadlineChange,
+                onDeadlineClick = { showDatePicker = true },
                 onNotesChange = viewModel::onNotesChange,
                 onAddReminder = viewModel::addReminder,
                 onRemoveReminder = viewModel::removeReminder,
+                onRefreshReminders = viewModel::refreshReminders,
                 onSave = {
                     viewModel.saveChanges { onBack() }
                 }
@@ -117,12 +197,12 @@ fun EditItemScreen(
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
                     )
                 },
-                containerColor = Color.White
+                containerColor = MaterialTheme.colorScheme.background
             ) { padding ->
                 when (val state = uiState) {
                     EditItemUiState.Loading -> {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color(0xFF2D6A4F))
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         }
                     }
                     is EditItemUiState.Error -> {
@@ -137,10 +217,11 @@ fun EditItemScreen(
                             onTitleChange = viewModel::onTitleChange,
                             onOrganizationChange = viewModel::onOrganizationChange,
                             onLocationChange = viewModel::onLocationChange,
-                            onDeadlineChange = viewModel::onDeadlineChange,
+                            onDeadlineClick = { showDatePicker = true },
                             onNotesChange = viewModel::onNotesChange,
                             onAddReminder = viewModel::addReminder,
                             onRemoveReminder = viewModel::removeReminder,
+                            onRefreshReminders = viewModel::refreshReminders,
                             onSave = {
                                 viewModel.saveChanges { onBack() }
                             }
@@ -163,13 +244,15 @@ fun EditItemContentMedium(
     onTitleChange: (String) -> Unit,
     onOrganizationChange: (String) -> Unit,
     onLocationChange: (String) -> Unit,
-    onDeadlineChange: (String) -> Unit,
+    onDeadlineClick: () -> Unit,
     onNotesChange: (String) -> Unit,
     onAddReminder: (String, String) -> Unit,
     onRemoveReminder: (Reminder) -> Unit,
+    onRefreshReminders: () -> Unit,
     onSave: () -> Unit
 ) {
     Scaffold(
+        modifier = Modifier.statusBarsPadding(),
         bottomBar = { 
             EditBottomNavigation(
                 onHomeClick = onNavigateToHome,
@@ -212,17 +295,18 @@ fun EditItemContentMedium(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = onBack) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                                 }
                                 Text(
                                     "Edit Item",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.padding(start = 8.dp)
                                 )
                             }
                             TextButton(onClick = onSave) {
-                                Text("Save", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)
+                                Text("Save", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -234,7 +318,7 @@ fun EditItemContentMedium(
                             "ORIGINAL CAPTURE",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             letterSpacing = 1.sp
                         )
 
@@ -245,7 +329,7 @@ fun EditItemContentMedium(
                                 .fillMaxWidth()
                                 .aspectRatio(0.85f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF8FAF8)),
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             if (uiState.item.originalMediaUri != null) {
@@ -257,8 +341,8 @@ fun EditItemContentMedium(
                                 )
                             } else {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.Image, null, tint = Color.LightGray, modifier = Modifier.size(48.dp))
-                                    Text("Screenshot from LinkedIn", color = Color.Gray, fontSize = 12.sp)
+                                    Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(48.dp))
+                                    Text("Screenshot from Source", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -266,9 +350,10 @@ fun EditItemContentMedium(
                         Spacer(modifier = Modifier.height(24.dp))
 
                         Surface(
-                            color = Color(0xFFF4F6F4),
+                            color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -276,23 +361,33 @@ fun EditItemContentMedium(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_linkedin),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp),
-                                        tint = Color.Unspecified
-                                    )
+                                    val icon = SourceIconProvider.getIconForSource(uiState.item.source)
+                                    if (icon is SourceIcon.Resource) {
+                                        Icon(
+                                            painter = painterResource(id = icon.resId),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = Color.Unspecified
+                                        )
+                                    } else if (icon is SourceIcon.Vector) {
+                                        Icon(
+                                            imageVector = icon.imageVector,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Shared from LinkedIn",
+                                        text = "Shared from ${uiState.item.source ?: "Unknown"}",
                                         fontSize = 12.sp,
-                                        color = Color.Gray
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Text(
-                                    text = "Saved yesterday",
+                                    text = DateUtils.getTimeAgo(uiState.item.createdAt),
                                     fontSize = 12.sp,
-                                    color = Color.Gray
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -302,11 +397,11 @@ fun EditItemContentMedium(
                             "A captured moment, made useful.",
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                             fontSize = 12.sp,
-                            color = Color.LightGray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
 
-                    VerticalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp)
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
 
                     // Right Column: Edit Details
                     Column(
@@ -324,21 +419,10 @@ fun EditItemContentMedium(
                             Text(
                                 "Edit Details",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Surface(
-                                color = Color(0xFFEAF2EE),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.BusinessCenter, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(uiState.category, color = Color(0xFF2D6A4F), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                            CategoryInfoChip(uiState.category)
                         }
 
                         if (uiState is EditItemUiState.Success && uiState.validationError != null) {
@@ -365,31 +449,52 @@ fun EditItemContentMedium(
                         Spacer(modifier = Modifier.height(16.dp))
                         EditTextField(label = "Location", value = uiState.location, onValueChange = onLocationChange)
                         Spacer(modifier = Modifier.height(16.dp))
-                        EditTextField(
-                            label = "Application Deadline",
-                            value = uiState.deadline,
-                            onValueChange = onDeadlineChange,
-                            trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(20.dp)) }
-                        )
+                        
+                        Box(modifier = Modifier.clickable { onDeadlineClick() }) {
+                            EditTextField(
+                                label = "Application Deadline",
+                                value = DateUtils.formatDisplayDate(uiState.deadline),
+                                onValueChange = {},
+                                enabled = false,
+                                trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
+                            )
+                        }
+                        
                         Spacer(modifier = Modifier.height(16.dp))
                         EditTextField(label = "Notes", value = uiState.notes, onValueChange = onNotesChange, minLines = 2)
 
                         Spacer(modifier = Modifier.height(32.dp))
 
-                        Text(
-                            "REMINDERS",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            letterSpacing = 1.sp
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "REMINDERS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                letterSpacing = 1.sp
+                            )
+                            
+                            IconButton(onClick = onRefreshReminders, modifier = Modifier.size(24.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Sync,
+                                    contentDescription = "Sync with Deadline",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Surface(
-                            color = Color(0xFFF9FAF9),
+                            color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
                             Column {
                                 uiState.reminders.forEachIndexed { index, reminder ->
@@ -401,7 +506,7 @@ fun EditItemContentMedium(
                                     if (index < uiState.reminders.size - 1) {
                                         HorizontalDivider(
                                             modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = Color(0xFFF0F0F0)
+                                            color = MaterialTheme.colorScheme.outlineVariant
                                         )
                                     }
                                 }
@@ -411,10 +516,10 @@ fun EditItemContentMedium(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         TextButton(
-                            onClick = { onAddReminder("CUSTOM", "2025-08-31") },
+                            onClick = { onAddReminder("CUSTOM", LocalDate.now().toString()) },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         ) {
-                            Text("+ Add Reminder", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)
+                            Text("+ Add Reminder", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
@@ -422,9 +527,9 @@ fun EditItemContentMedium(
                             onClick = onSave,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F))
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Save Changes", fontWeight = FontWeight.Bold)
+                            Text("Save Changes", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
@@ -444,14 +549,15 @@ fun EditItemContentExpanded(
     onTitleChange: (String) -> Unit,
     onOrganizationChange: (String) -> Unit,
     onLocationChange: (String) -> Unit,
-    onDeadlineChange: (String) -> Unit,
+    onDeadlineClick: () -> Unit,
     onNotesChange: (String) -> Unit,
     onAddReminder: (String, String) -> Unit,
     onRemoveReminder: (Reminder) -> Unit,
+    onRefreshReminders: () -> Unit,
     onSave: () -> Unit
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
-        // Side Navigation (Placeholder matching mockup)
+        // Side Navigation
         EditSideNavigation(
             onBack = onBack,
             onHomeClick = onNavigateToHome,
@@ -526,7 +632,7 @@ fun EditItemContentExpanded(
                         } else {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.Image, null, tint = Color.LightGray, modifier = Modifier.size(48.dp))
-                                Text("Screenshot from LinkedIn", color = Color.Gray, fontSize = 12.sp)
+                                Text("Screenshot from Source", color = Color.Gray, fontSize = 12.sp)
                             }
                         }
                     }
@@ -544,21 +650,31 @@ fun EditItemContentExpanded(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_linkedin),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = Color.Unspecified
-                                )
+                                val icon = SourceIconProvider.getIconForSource(uiState.item.source)
+                                if (icon is SourceIcon.Resource) {
+                                    Icon(
+                                        painter = painterResource(id = icon.resId),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = Color.Unspecified
+                                    )
+                                } else if (icon is SourceIcon.Vector) {
+                                    Icon(
+                                        imageVector = icon.imageVector,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = Color(0xFF2D6A4F)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Shared from LinkedIn",
+                                    text = "Shared from ${uiState.item.source ?: "Unknown"}",
                                     fontSize = 12.sp,
                                     color = Color.Gray
                                 )
                             }
                             Text(
-                                text = "Saved yesterday",
+                                text = DateUtils.getTimeAgo(uiState.item.createdAt),
                                 fontSize = 12.sp,
                                 color = Color.Gray
                             )
@@ -584,15 +700,16 @@ fun EditItemContentExpanded(
                         Text(
                             "Edit Details",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Button(
                             onClick = onSave,
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
                         ) {
-                            Text("Save", fontWeight = FontWeight.Bold)
+                            Text("Save", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
 
@@ -631,19 +748,22 @@ fun EditItemContentExpanded(
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(1f)) {
-                            EditTextField(
-                                label = "Application Deadline",
-                                value = uiState.deadline,
-                                onValueChange = onDeadlineChange,
-                                trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(20.dp)) }
-                            )
+                            Box(modifier = Modifier.clickable { onDeadlineClick() }) {
+                                EditTextField(
+                                    label = "Application Deadline",
+                                    value = DateUtils.formatDisplayDate(uiState.deadline),
+                                    onValueChange = {},
+                                    enabled = false,
+                                    trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
+                                )
+                            }
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             EditTextField(
                                 label = "Job Type",
                                 value = "Internship", // Mock/Metadata
                                 onValueChange = {},
-                                trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.Gray) }
+                                trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                             )
                         }
                     }
@@ -654,20 +774,36 @@ fun EditItemContentExpanded(
 
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    Text(
-                        "REMINDERS",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Gray,
-                        letterSpacing = 1.sp
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "REMINDERS",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 1.sp
+                        )
+                        
+                        IconButton(onClick = onRefreshReminders, modifier = Modifier.size(24.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Sync with Deadline",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Surface(
-                        color = Color(0xFFF9FAF9),
+                        color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Column {
                             uiState.reminders.forEachIndexed { index, reminder ->
@@ -679,7 +815,7 @@ fun EditItemContentExpanded(
                                 if (index < uiState.reminders.size - 1) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(horizontal = 16.dp),
-                                        color = Color(0xFFF0F0F0)
+                                        color = MaterialTheme.colorScheme.outlineVariant
                                     )
                                 }
                             }
@@ -689,10 +825,10 @@ fun EditItemContentExpanded(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     TextButton(
-                        onClick = { onAddReminder("CUSTOM", "2025-08-31") },
+                        onClick = { onAddReminder("CUSTOM", LocalDate.now().toString()) },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
-                        Text("+ Add Reminder", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)
+                        Text("+ Add Reminder", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -707,10 +843,11 @@ fun EditItemContentSmall(
     onTitleChange: (String) -> Unit,
     onOrganizationChange: (String) -> Unit,
     onLocationChange: (String) -> Unit,
-    onDeadlineChange: (String) -> Unit,
+    onDeadlineClick: () -> Unit,
     onNotesChange: (String) -> Unit,
     onAddReminder: (String, String) -> Unit,
     onRemoveReminder: (Reminder) -> Unit,
+    onRefreshReminders: () -> Unit,
     onSave: () -> Unit
 ) {
     Column(
@@ -746,24 +883,44 @@ fun EditItemContentSmall(
         Spacer(modifier = Modifier.height(16.dp))
         EditTextField(label = "Location", value = state.location, onValueChange = onLocationChange)
         Spacer(modifier = Modifier.height(16.dp))
-        EditTextField(
-            label = "Application Deadline", 
-            value = state.deadline, 
-            onValueChange = onDeadlineChange,
-            trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(20.dp)) }
-        )
+        
+        Box(modifier = Modifier.clickable { onDeadlineClick() }) {
+            EditTextField(
+                label = "Application Deadline", 
+                value = DateUtils.formatDisplayDate(state.deadline), 
+                onValueChange = {},
+                enabled = false,
+                trailingIcon = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(20.dp)) }
+            )
+        }
+        
         Spacer(modifier = Modifier.height(16.dp))
         EditTextField(label = "Notes", value = state.notes, onValueChange = onNotesChange, minLines = 3)
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Text(
-            "REMINDERS",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color.Gray,
-            letterSpacing = 1.sp
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "REMINDERS",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.Gray,
+                letterSpacing = 1.sp
+            )
+            
+            IconButton(onClick = onRefreshReminders, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = "Sync with Deadline",
+                    tint = Color(0xFF2D6A4F),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
         
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -792,7 +949,7 @@ fun EditItemContentSmall(
         Spacer(modifier = Modifier.height(16.dp))
 
         TextButton(
-            onClick = { onAddReminder("CUSTOM", "2025-08-31") },
+            onClick = { onAddReminder("CUSTOM", LocalDate.now().toString()) },
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
             Text("+ Add Reminder", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)
@@ -819,25 +976,19 @@ fun EditItemContentSmall(
 fun CategoryInfoChip(category: String) {
     Surface(
         color = Color(0xFFEAF2EE),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(12.dp)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_linkedin),
-                contentDescription = null,
-                tint = Color(0xFF2D6A4F),
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
+            Icon(Icons.Default.Label, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Editing a $category item – fields are tailored to this category",
-                fontSize = 12.sp,
+                text = category,
                 color = Color(0xFF2D6A4F),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
             )
         }
     }
@@ -845,146 +996,126 @@ fun CategoryInfoChip(category: String) {
 
 @Composable
 fun EditSideNavigation(
-    onBack: () -> Unit = {},
-    onHomeClick: () -> Unit = {},
-    onInboxClick: () -> Unit = {},
-    onRemindersClick: () -> Unit = {},
-    onProfileClick: () -> Unit = {}
+    onBack: () -> Unit,
+    onHomeClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onRemindersClick: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
-    NavigationRail(
-        containerColor = Color.White,
-        header = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                Surface(modifier = Modifier.size(32.dp), shape = CircleShape, color = Color(0xFFF0F4F2)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("R", fontWeight = FontWeight.Bold, color = Color(0xFF2D6A4F))
-                    }
-                }
-            }
-        },
-        modifier = Modifier.width(80.dp)
+    Column(
+        modifier = Modifier
+            .width(80.dp)
+            .fillMaxHeight()
+            .padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.Black)
+        }
+        
+        Spacer(modifier = Modifier.height(48.dp))
+
         NavigationRailItem(
-            icon = { Icon(Icons.Default.Home, null) },
-            label = { Text("Home", fontSize = 10.sp) },
+            icon = { Icon(Icons.Default.Home, "Home") },
             selected = false,
             onClick = onHomeClick,
-            colors = NavigationRailItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Home") }
         )
         NavigationRailItem(
-            icon = { Icon(Icons.Default.Inbox, null) },
-            label = { Text("Inbox", fontSize = 10.sp) },
-            selected = true,
+            icon = { Icon(Icons.Default.Inbox, "Inbox") },
+            selected = false,
             onClick = onInboxClick,
-            colors = NavigationRailItemDefaults.colors(selectedIconColor = Color(0xFF2D6A4F), selectedTextColor = Color(0xFF2D6A4F), indicatorColor = Color(0xFFE3EEE7))
+            label = { Text("Inbox") }
         )
         NavigationRailItem(
-            icon = { Icon(Icons.Default.Notifications, null) },
-            label = { Text("Reminders", fontSize = 10.sp) },
+            icon = { Icon(Icons.Default.Notifications, "Reminders") },
             selected = false,
             onClick = onRemindersClick,
-            colors = NavigationRailItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Reminders") }
         )
         NavigationRailItem(
-            icon = { Icon(Icons.Default.AccountCircle, null) },
-            label = { Text("Profile", fontSize = 10.sp) },
+            icon = { Icon(Icons.Default.Person, "Profile") },
             selected = false,
             onClick = onProfileClick,
-            colors = NavigationRailItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Profile") }
         )
-        Spacer(modifier = Modifier.weight(1f))
-        Text("Save", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 24.dp))
     }
 }
 
 @Composable
 fun EditBottomNavigation(
-    onHomeClick: () -> Unit = {},
-    onInboxClick: () -> Unit = {},
-    onRemindersClick: () -> Unit = {},
-    onProfileClick: () -> Unit = {}
+    onHomeClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onRemindersClick: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
     NavigationBar(
         containerColor = Color.White,
-        tonalElevation = 0.dp,
-        modifier = Modifier.height(80.dp)
+        tonalElevation = 8.dp
     ) {
         NavigationBarItem(
-            icon = { Icon(Icons.Default.Home, null) },
-            label = { Text("Home") },
+            icon = { Icon(Icons.Default.Home, "Home") },
             selected = false,
             onClick = onHomeClick,
-            colors = NavigationBarItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Home") }
         )
         NavigationBarItem(
-            icon = {
-                Surface(
-                    color = Color(0xFFE3EEE7),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Icon(Icons.Default.Inbox, null, tint = Color(0xFF2D6A4F))
-                    }
-                }
-            },
-            label = { Text("Inbox", color = Color(0xFF2D6A4F)) },
-            selected = true,
+            icon = { Icon(Icons.Default.Inbox, "Inbox") },
+            selected = false,
             onClick = onInboxClick,
-            colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF2D6A4F), indicatorColor = Color.Transparent)
+            label = { Text("Inbox") }
         )
         NavigationBarItem(
-            icon = { Icon(Icons.Default.Notifications, null) },
-            label = { Text("Reminders") },
+            icon = { Icon(Icons.Default.Notifications, "Reminders") },
             selected = false,
             onClick = onRemindersClick,
-            colors = NavigationBarItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Reminders") }
         )
         NavigationBarItem(
-            icon = { Icon(Icons.Default.AccountCircle, null) },
-            label = { Text("Profile") },
+            icon = { Icon(Icons.Default.Person, "Profile") },
             selected = false,
             onClick = onProfileClick,
-            colors = NavigationBarItemDefaults.colors(unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+            label = { Text("Profile") }
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTextField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
     minLines: Int = 1,
-    trailingIcon: @Composable (() -> Unit)? = null
+    enabled: Boolean = true,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    singleLine: Boolean = true
 ) {
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = label,
-            fontSize = 11.sp,
-            color = Color.Gray,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 1.sp
         )
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedBorderColor = Color(0xFFE0E0E0),
-                focusedBorderColor = Color(0xFF2D6A4F),
-                unfocusedContainerColor = Color.White,
-                focusedContainerColor = Color.White
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
             ),
             minLines = minLines,
+            enabled = enabled,
             trailingIcon = trailingIcon,
-            textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+            singleLine = singleLine
         )
     }
 }
@@ -994,17 +1125,17 @@ fun ReminderEditRow(label: String, date: String, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(16.dp, 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(24.dp),
-            shape = CircleShape,
-            color = Color(0xFF2D6A4F)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFEAF2EE)),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
-            }
+            Icon(Icons.Default.Notifications, null, tint = Color(0xFF2D6A4F), modifier = Modifier.size(16.dp))
         }
         Spacer(modifier = Modifier.width(12.dp))
         Text(
@@ -1029,14 +1160,15 @@ fun ReminderEditRow(label: String, date: String, onRemove: () -> Unit) {
 fun EditItemPreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Summer Internship 2025",
         summary = "Need to update CV and portfolio before applying.",
         category = "Jobs",
-        deadline = "31 August 2025",
+        deadline = "2025-08-31T10:00:00",
         eventDate = null,
         organization = "Google",
         source = "LinkedIn",
-        createdAt = "2024-01-01",
+        createdAt = "2024-01-01T10:00:00",
         status = "active",
         originalMediaUri = null
     )
@@ -1046,7 +1178,7 @@ fun EditItemPreview() {
             title = "Google Summer Internship 2025",
             organization = "Google",
             location = "London, UK",
-            deadline = "31 August 2025",
+            deadline = "2025-08-31T10:00:00",
             notes = "Need to update CV and portfolio before applying.",
             category = "Jobs",
             reminders = listOf(
@@ -1092,10 +1224,11 @@ fun EditItemPreview() {
                 onTitleChange = {},
                 onOrganizationChange = {},
                 onLocationChange = {},
-                onDeadlineChange = {},
+                onDeadlineClick = {},
                 onNotesChange = {},
                 onAddReminder = { _, _ -> },
                 onRemoveReminder = {},
+                onRefreshReminders = {},
                 onSave = {}
             )
         }
@@ -1107,14 +1240,15 @@ fun EditItemPreview() {
 fun EditItemMediumPreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Summer Internship 2025",
         summary = "Need to update CV and portfolio before applying.",
         category = "Jobs",
-        deadline = "31 August 2025",
+        deadline = "2025-08-31T10:00:00",
         eventDate = null,
         organization = "Google",
         source = "LinkedIn",
-        createdAt = "2024-01-01",
+        createdAt = "2024-01-01T10:00:00",
         status = "active",
         originalMediaUri = null
     )
@@ -1124,7 +1258,7 @@ fun EditItemMediumPreview() {
             title = "Google Summer Internship 2025",
             organization = "Google",
             location = "London, UK",
-            deadline = "31 August 2025",
+            deadline = "2025-08-31T10:00:00",
             notes = "Need to update CV and portfolio before applying.",
             category = "Jobs",
             reminders = listOf(
@@ -1140,10 +1274,11 @@ fun EditItemMediumPreview() {
             onTitleChange = {},
             onOrganizationChange = {},
             onLocationChange = {},
-            onDeadlineChange = {},
+            onDeadlineClick = {},
             onNotesChange = {},
             onAddReminder = { _, _ -> },
             onRemoveReminder = {},
+            onRefreshReminders = {},
             onSave = {}
         )
     }
@@ -1154,14 +1289,15 @@ fun EditItemMediumPreview() {
 fun EditItemExpandedPreview() {
     val sampleItem = Item(
         id = "1",
+        userId = "sample",
         title = "Google Summer Internship 2025",
         summary = "Need to update CV and portfolio before applying.",
         category = "Jobs",
-        deadline = "31 August 2025",
+        deadline = "2025-08-31T10:00:00",
         eventDate = null,
         organization = "Google",
         source = "LinkedIn",
-        createdAt = "2024-01-01",
+        createdAt = "2024-01-01T10:00:00",
         status = "active",
         originalMediaUri = null
     )
@@ -1171,7 +1307,7 @@ fun EditItemExpandedPreview() {
             title = "Google Summer Internship 2025",
             organization = "Google",
             location = "London, UK",
-            deadline = "31 August 2025",
+            deadline = "2025-08-31T10:00:00",
             notes = "Need to update CV and portfolio before applying.",
             category = "Jobs",
             reminders = listOf(
@@ -1187,10 +1323,11 @@ fun EditItemExpandedPreview() {
             onTitleChange = {},
             onOrganizationChange = {},
             onLocationChange = {},
-            onDeadlineChange = {},
+            onDeadlineClick = {},
             onNotesChange = {},
             onAddReminder = { _, _ -> },
             onRemoveReminder = {},
+            onRefreshReminders = {},
             onSave = {}
         )
     }
