@@ -34,12 +34,22 @@ class RemindlyApp : Application() {
         subscriptionRepository.onSyncLocalItemsToBackend = {
             val userId = authRepository.currentUser.value?.uid
             if (userId != null) {
-                val items = localRepository.getAllItems(userId).first()
-                items.forEach { item ->
-                    localRepository.addPendingSync(com.victorkirui.local.entity.PendingSync(itemId = item.id))
+                MainScope().launch {
+                    val items = localRepository.getAllItems(userId).first()
+                    var reprocessedCount = 0
+                    items.forEach { item ->
+                        if (item.status == "FAILED" || item.status == "RETRYING" || item.status == "PENDING") {
+                            val resetItem = item.copy(status = "PENDING", title = "Analysing...")
+                            localRepository.saveItem(resetItem)
+                            localRepository.addPendingSync(com.victorkirui.local.entity.PendingSync(itemId = item.id))
+                            reprocessedCount++
+                        }
+                    }
+                    if (reprocessedCount > 0) {
+                        com.victorkirui.module_features.capturing.SyncWorker.schedule(this@RemindlyApp)
+                        android.util.Log.d("RemindlyApp", "Enqueued $reprocessedCount quota-failed/pending items for AI re-analysis after Pro upgrade.")
+                    }
                 }
-                com.victorkirui.module_features.capturing.SyncWorker.schedule(this)
-                android.util.Log.d("RemindlyApp", "Enqueued ${items.size} local items for background sync after Pro upgrade.")
             }
         }
 
