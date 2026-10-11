@@ -21,7 +21,7 @@ object SourceIconProvider {
             s.contains("linkedin") || s.contains("jobs") -> SourceIcon.Resource(R.drawable.ic_linkedin)
             s.contains("gmail") || s.contains("google.gm") || s.contains("mail") -> SourceIcon.Resource(R.drawable.ic_gmail)
             s.contains("intent") || s.contains("fab") -> SourceIcon.Vector(Icons.Default.Work)
-            s.contains("chrome") || s.contains("browser") || s.contains("http") || s.contains("www") || s.contains(".") || 
+            s.contains("chrome") || s.contains("browser") || s.contains("http") || s.contains("www") || s.contains(".") ||
             s.contains("edge") || s.contains("firefox") || s.contains("safari") -> SourceIcon.Vector(Icons.Default.Link)
             else -> SourceIcon.Vector(Icons.Default.Link)
         }

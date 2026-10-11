@@ -39,6 +39,7 @@ interface LocalRepository : DataClearer {
     suspend fun deletePendingSyncItems(userId: String)
     suspend fun deleteExpiredItems(userId: String)
     suspend fun deleteAllItemsForUser(userId: String)
+    suspend fun getAllItemsSyncForUser(userId: String): List<Item>
 
     suspend fun <R> withTransaction(block: suspend () -> R): R
 }

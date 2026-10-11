@@ -36,36 +36,49 @@ class BriefingWorker(
         }
 
         val today = LocalDate.now()
-        val remindersToday = localRepository.getAllRemindersWithItems(userId).first().filter {
-            try {
-                val reminderDate = LocalDateTime.parse(it.reminder.reminderDateTime).toLocalDate()
-                reminderDate.isEqual(today) && it.item.status != "DONE"
-            } catch (e: Exception) {
-                it.reminder.reminderDateTime.startsWith(today.toString()) && it.item.status != "DONE"
+        val allItems = localRepository.getAllItems(userId).first().filter {
+            it.status != "DONE" && it.status != "FAILED"
+        }
+
+        val pendingCount = allItems.size
+        val dueTodayItems = allItems.filter { item ->
+            val deadlineDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(item.deadline)
+            val eventDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(item.eventDate)
+            (deadlineDate?.isEqual(today) == true) || (eventDate?.isEqual(today) == true)
+        }
+        val dueTodayCount = dueTodayItems.size
+
+        val (title, message) = when {
+            dueTodayCount > 0 -> {
+                val dueText = if (dueTodayCount == 1) {
+                    "1 item due today: \"${dueTodayItems.first().title}\""
+                } else {
+                    "$dueTodayCount items due today"
+                }
+                val pendingText = if (pendingCount == dueTodayCount) {
+                    ""
+                } else {
+                    " ($pendingCount total pending)"
+                }
+                "Daily Briefing" to "$dueText$pendingText. Stay on top of your goals!"
+            }
+            pendingCount > 0 -> {
+                val pendingStr = if (pendingCount == 1) "1 pending item" else "$pendingCount pending items"
+                "Daily Briefing" to "No deadlines due today. You have $pendingStr in your pipeline."
+            }
+            else -> {
+                val engagementMessages = listOf(
+                    "Your schedule is clear today! Great time to capture new opportunities.",
+                    "No pending items or deadlines today. Enjoy your day!",
+                    "All caught up! Keep capturing interesting notes and events with Remindly.",
+                    "A clear day ahead! Explore new goals and opportunities."
+                )
+                "Plan Your Day" to engagementMessages.random()
             }
         }
 
-        if (remindersToday.isNotEmpty()) {
-            val count = remindersToday.size
-            val (title, message) = if (count == 1) {
-                "Today's Goal" to "You have one item needing your attention today: ${remindersToday.first().item.title}. You've got this!"
-            } else {
-                "Daily Briefing" to "You have $count things lined up for today. Try to work on them before their deadlines."
-            }
-            // Use a fixed notification ID for briefings so they replace each other
-            notificationHelper.showNotification(title, message, notificationId = 1001)
-            android.util.Log.d("BriefingWorker", "Sent morning briefing with $count items.")
-        } else {
-            val engagementMessages = listOf(
-                "Your schedule is clear! It’s a great time to explore new opportunities.",
-                "No deadlines today. Why not take a few minutes to organize your upcoming goals?",
-                "A clear day ahead! Keep sharing interesting captures with Remindly.",
-                "Nothing on the list for today. Spend some time searching for your next big thing."
-            )
-            val randomMessage = engagementMessages.random()
-            notificationHelper.showNotification("Plan Your Day", randomMessage, notificationId = 1001)
-            android.util.Log.d("BriefingWorker", "Sent engagement notification.")
-        }
+        notificationHelper.showNotification(title, message, notificationId = 1001)
+        android.util.Log.d("BriefingWorker", "Sent morning briefing: dueToday=$dueTodayCount, pending=$pendingCount")
 
         return Result.success()
     }

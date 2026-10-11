@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
+import com.victorkirui.core.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun RemindlyNavigationRail(
     currentScreen: String,
+    isPremium: Boolean = false,
     onHomeClick: () -> Unit = {},
     onInboxClick: () -> Unit = {},
     onRemindersClick: () -> Unit = {},
@@ -38,13 +41,30 @@ fun RemindlyNavigationRail(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Logo
-        Text(
-            "R",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black,
-            color = Color(0xFF2D6A4F),
-            modifier = Modifier.padding(bottom = 48.dp)
+        Icon(
+            painter = painterResource(id = R.drawable.app_icon),
+            contentDescription = "App Icon",
+            tint = Color(0xFF2D6A4F),
+            modifier = Modifier.size(36.dp)
         )
+        if (isPremium) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Surface(
+                color = Color(0xFFD4AF37),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    "PRO",
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        } else {
+            Spacer(modifier = Modifier.height(36.dp))
+        }
 
         NavigationRailItem(
             icon = { Icon(if (currentScreen == "Home") Icons.Filled.Home else Icons.Outlined.Home, "Home") },
@@ -59,9 +79,9 @@ fun RemindlyNavigationRail(
             onClick = onInboxClick
         )
         NavigationRailItem(
-            icon = { Icon(if (currentScreen == "Reminders") Icons.Filled.Notifications else Icons.Outlined.Notifications, "Reminders") },
-            label = "Reminders",
-            selected = currentScreen == "Reminders",
+            icon = { Icon(if (currentScreen == "Calendar" || currentScreen == "Reminders") Icons.Filled.CalendarToday else Icons.Outlined.CalendarToday, "Calendar") },
+            label = "Calendar",
+            selected = currentScreen == "Calendar" || currentScreen == "Reminders",
             onClick = onRemindersClick
         )
         NavigationRailItem(
@@ -139,12 +159,12 @@ fun RemindlyBottomNavigation(
         val items = listOf(
             BottomNavItem("Home", Icons.Outlined.Home, Icons.Filled.Home, onHomeClick),
             BottomNavItem("Inbox", Icons.Outlined.Inbox, Icons.Filled.Inbox, onInboxClick),
-            BottomNavItem("Reminders", Icons.Outlined.Notifications, Icons.Filled.Notifications, onRemindersClick),
+            BottomNavItem("Calendar", Icons.Outlined.CalendarToday, Icons.Filled.CalendarToday, onRemindersClick),
             BottomNavItem("Profile", Icons.Outlined.Person, Icons.Filled.Person, onProfileClick)
         )
 
         items.forEach { item ->
-            val isSelected = currentScreen == item.label
+            val isSelected = currentScreen == item.label || (item.label == "Calendar" && currentScreen == "Reminders")
             NavigationBarItem(
                 selected = isSelected,
                 onClick = item.onClick,

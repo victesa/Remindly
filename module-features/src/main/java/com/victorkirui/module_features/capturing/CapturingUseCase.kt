@@ -41,6 +41,7 @@ class CapturingUseCase(
     private val reminderScheduler: ReminderScheduler,
     private val calendarManager: com.victorkirui.core.calendar.CalendarManager,
     private val pdfTextExtractor: PdfTextExtractor,
+    private val notificationHelper: com.victorkirui.core.notification.NotificationHelper,
     private val timestampProvider: () -> String
 ) {
     suspend operator fun invoke(shareContent: ShareContent): CaptureResult {
@@ -76,7 +77,8 @@ class CapturingUseCase(
                     if (tier == SubscriptionTier.FREE) {
                         val currentCount = subscriptionRepository.imageCaptureCount.first()
                         if (currentCount >= subscriptionRepository.freeImageLimit) {
-                            return CaptureResult.UpgradeRequired("You have reached the limit of image captures for the free tier. Upgrade to Premium for unlimited visual analysis.")
+                            return CaptureResult.UpgradeRequired("You have reached the free tier limit of 10 AI extractions for this month. Upgrade to Remindly Pro for 250 monthly AI extractions.")
+
                         }
                         subscriptionRepository.incrementImageCaptureCount()
                     }
@@ -88,12 +90,12 @@ class CapturingUseCase(
                 is ShareContent.Pdf -> {
                     val originalUri = Uri.parse(shareContent.uriString)
                     mediaUri = copyToInternalStorage(originalUri, itemId, "DOCUMENT")
-                    
-                    val maxPages = if (tier == SubscriptionTier.PREMIUM) 
-                        subscriptionRepository.premiumPdfPageLimit 
-                    else 
+
+                    val maxPages = if (tier == SubscriptionTier.PREMIUM)
+                        subscriptionRepository.premiumPdfPageLimit
+                    else
                         subscriptionRepository.freePdfPageLimit
-                        
+
                     Log.d("CapturingUseCase", "Processing PDF. Tier: $tier, maxPages: $maxPages")
                     extractedTextFromOcr = pdfTextExtractor.extractText(mediaUri ?: originalUri, maxPages = maxPages)
                 }
@@ -146,10 +148,7 @@ class CapturingUseCase(
                 status = "PENDING"
             )
             
-            localRepository.withTransaction {
-                localRepository.saveItem(initialItem)
-                localRepository.addPendingSync(PendingSync(itemId = itemId))
-            }
+            localRepository.saveItem(initialItem)
 
             // 3. AI Extraction & Storage (Unified)
             val aiInput = AiInput(
@@ -157,8 +156,10 @@ class CapturingUseCase(
                 url = sourceUrl,
                 mediaUri = if (contentType == "DOCUMENT") null else mediaUri, // Rule: Do not upload raw PDF as image
                 contentType = contentType,
-                idempotencyKey = itemId 
+                idempotencyKey = "${itemId}_${System.currentTimeMillis()}",
+                source = sourceApp
             )
+
 
             // CRITICAL: Double-check that we are actually sending content to the backend.
             if (aiInput.text == null && aiInput.url == null && aiInput.mediaUri == null) {
@@ -182,41 +183,21 @@ class CapturingUseCase(
             }
 
             if (result is AiResult.Success) {
-                // Precision check for past deadlines
-                val deadlineDateTime = result.deadline?.let { DateUtils.parseToDateTime(it) }
-                val eventDateTime = result.eventDate?.let { DateUtils.parseToDateTime(it) }
-                val now = java.time.LocalDateTime.now()
-
-                // Reject if the deadline or event date is in the past
-                val rejectionThreshold = now
-
-                if ((deadlineDateTime != null && deadlineDateTime.isBefore(rejectionThreshold)) || 
-                    (eventDateTime != null && eventDateTime.isBefore(rejectionThreshold))) {
-                    
-                    localRepository.withTransaction {
-                        localRepository.deleteItem(userId, itemId)
-                        localRepository.removePendingSync(itemId)
-                    }
-                    return CaptureResult.Overdue(Item(
-                        id = itemId, 
-                        userId = userId, 
-                        title = result.title, 
-                        deadline = result.deadline, 
-                        eventDate = result.eventDate, 
-                        status = "REJECTED", 
-                        createdAt = capturedAt, 
-                        summary = result.summary, 
-                        category = result.category
-                    ))
+                val cleanDeadline = result.deadline?.takeIf { 
+                    it.isNotBlank() && !it.equals("null", ignoreCase = true) && !it.equals("none", ignoreCase = true) && !it.equals("n/a", ignoreCase = true)
                 }
+                val rawEventDate = result.eventDate?.takeIf { 
+                    it.isNotBlank() && !it.equals("null", ignoreCase = true) && !it.equals("none", ignoreCase = true) && !it.equals("n/a", ignoreCase = true)
+                }
+                val cleanEventDate = DateUtils.sanitizeEventDate(rawEventDate, cleanDeadline)
 
                 val updatedItem = initialItem.copy(
                     id = result.id ?: initialItem.id,
                     title = result.title,
                     summary = result.summary,
                     category = result.category,
-                    deadline = result.deadline,
-                    eventDate = result.eventDate,
+                    deadline = cleanDeadline,
+                    eventDate = cleanEventDate,
                     organization = result.organization,
                     checklist = result.checklist,
                     status = "READY",
@@ -227,12 +208,15 @@ class CapturingUseCase(
                 )
 
                 localRepository.withTransaction {
-                    if (updatedItem.id != initialItem.id) {
-                        localRepository.deleteItem(userId, initialItem.id)
+                    // Remove temporary local item and any duplicate local item
+                    localRepository.deleteItem(userId, initialItem.id)
+                    val localDup = localRepository.findDuplicate(userId, sourceUrl, extractedTextFromOcr)
+                    if (localDup != null && localDup.id != updatedItem.id) {
+                        localRepository.deleteItem(userId, localDup.id)
                     }
                     localRepository.saveItem(updatedItem)
                     reminderScheduler.scheduleRemindersForItem(updatedItem)
-                    localRepository.removePendingSync(itemId)
+                    localRepository.removePendingSync(initialItem.id)
                 }
 
                 // AUTO-SYNC TO CALENDAR (Premium Only)
@@ -260,23 +244,45 @@ class CapturingUseCase(
 
                 CaptureResult.Success(itemId)
             } else if (result is AiResult.Error && !result.isTransient) {
-                // Permanent AI failure
+                // Permanent AI failure (e.g. Quota Exceeded or Invalid Content)
+                val isQuotaError = result.message.contains("limit", ignoreCase = true) || 
+                                   result.message.contains("quota", ignoreCase = true) ||
+                                   result.message.contains("exhausted", ignoreCase = true)
+
+                val failedTitle = if (isQuotaError) "Monthly Limit Reached" else "Analysis Failed"
+                val failedSummary = if (isQuotaError) 
+                    "You've reached your monthly AI extraction limit. Upgrade to Remindly Pro for 250 monthly extractions."
+                else 
+                    result.message
+
                 val failedItem = initialItem.copy(
-                    title = "Analysis Failed",
-                    summary = result.message,
+                    title = failedTitle,
+                    summary = failedSummary,
                     status = "FAILED"
                 )
                 localRepository.withTransaction {
                     localRepository.saveItem(failedItem)
                     localRepository.removePendingSync(itemId)
                 }
-                CaptureResult.Error(result.message)
+
+                if (isQuotaError) {
+                    notificationHelper.showQuotaExhaustedNotification()
+                }
+
+                CaptureResult.Error(failedSummary)
             } else {
-                // AI Failed (transient) but we have it locally, schedule SyncWorker to retry AI later
-                val retryingItem = initialItem.copy(status = "RETRYING")
-                localRepository.saveItem(retryingItem)
+                // AI Failed (transient/offline) but saved locally; schedule SyncWorker to analyze when online
+                val retryingItem = initialItem.copy(
+                    title = "Saved Offline",
+                    summary = "Network unavailable. Remindly saved your capture locally and will analyze it automatically when online.",
+                    status = "RETRYING"
+                )
+                localRepository.withTransaction {
+                    localRepository.saveItem(retryingItem)
+                    localRepository.addPendingSync(PendingSync(itemId = itemId))
+                }
                 SyncWorker.schedule(context)
-                CaptureResult.SavedLocallyOnly(itemId, "AI Analysis is busy. Saved offline and will retry shortly.")
+                CaptureResult.SavedLocallyOnly(itemId, "Saved offline. Will analyze automatically when online.")
             }
         } catch (e: Exception) {
             Log.e("CapturingUseCase", "Capture flow failed", e)

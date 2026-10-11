@@ -217,11 +217,13 @@ fun CategoryDetailContent(
 
     val deadlineSoon = activeItems.filter { item ->
         val deadline = item.deadline
-        deadline != null && ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) <= 5
+        val date = DateUtils.parseToLocalDate(deadline)
+        date != null && ChronoUnit.DAYS.between(LocalDate.now(), date) <= 5
     }
     val upcoming = activeItems.filter { item ->
         val deadline = item.deadline
-        deadline != null && ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) > 5
+        val date = DateUtils.parseToLocalDate(deadline)
+        date != null && ChronoUnit.DAYS.between(LocalDate.now(), date) > 5
     }
     val noDeadline = activeItems.filter { it.deadline == null }
 
@@ -232,16 +234,64 @@ fun CategoryDetailContent(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text(
-                "${items.size} captures",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFFEAF2EE),
+                border = BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = when(categoryName.lowercase()) {
+                                "work", "jobs", "job" -> Icons.Default.WorkOutline
+                                "school", "education" -> Icons.Default.School
+                                "event", "events" -> Icons.Default.Event
+                                "receipt", "bills" -> Icons.Default.ReceiptLong
+                                "flight", "travel" -> Icons.Default.Flight
+                                "sync" -> Icons.Default.Sync
+                                else -> Icons.Default.FolderOpen
+                            },
+                            contentDescription = null,
+                            tint = Color(0xFF2D6A4F),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column {
+                        Text(
+                            categoryName,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color(0xFF2D6A4F)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "${items.size} ${if (items.size == 1) "capture" else "captures"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
         }
 
         if (deadlineSoon.isNotEmpty()) {
-            item { CategorySectionHeader("URGENT DEADLINES") }
+            item { CategorySectionHeader("URGENT DEADLINES", type = "URGENT") }
             items(deadlineSoon) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -262,7 +312,7 @@ fun CategoryDetailContent(
         }
 
         if (upcoming.isNotEmpty()) {
-            item { CategorySectionHeader("SCHEDULED") }
+            item { CategorySectionHeader("SCHEDULED", type = "SCHEDULED") }
             items(upcoming) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -282,7 +332,7 @@ fun CategoryDetailContent(
         }
 
         if (noDeadline.isNotEmpty()) {
-            item { CategorySectionHeader("NO SET DEADLINE") }
+            item { CategorySectionHeader("NO SET DEADLINE", type = "DEFAULT") }
             items(noDeadline) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -302,7 +352,7 @@ fun CategoryDetailContent(
         }
 
         if (completedItems.isNotEmpty()) {
-            item { CategorySectionHeader("COMPLETED", isCompleted = true) }
+            item { CategorySectionHeader("COMPLETED", type = "COMPLETED") }
             items(completedItems) { item ->
                 val icon = SourceIconProvider.getIconForSource(item.source)
                 val isSelected = selectedItemIds.contains(item.id)
@@ -338,7 +388,13 @@ private fun getSubtitleText(item: Item): String {
 }
 
 @Composable
-fun CategorySectionHeader(title: String, isCompleted: Boolean = false) {
+fun CategorySectionHeader(title: String, type: String = "DEFAULT") {
+    val (dotColor, textColor) = when (type) {
+        "URGENT" -> Color(0xFFC0392B) to Color(0xFFC0392B)
+        "COMPLETED" -> Color(0xFF2D6A4F) to Color(0xFF2D6A4F)
+        "SCHEDULED" -> Color(0xFF2D6A4F) to Color(0xFF2D6A4F)
+        else -> Color.Gray to Color.Gray
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -347,17 +403,17 @@ fun CategorySectionHeader(title: String, isCompleted: Boolean = false) {
     ) {
         Box(
             modifier = Modifier
-                .size(if (isCompleted) 8.dp else 6.dp)
+                .size(6.dp)
                 .clip(CircleShape)
-                .background(if (isCompleted) Evergreen else MountainBerry)
+                .background(dotColor)
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             title,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = if (isCompleted) Evergreen else MountainBerry,
-            letterSpacing = 1.5.sp
+            fontWeight = FontWeight.Bold,
+            color = textColor,
+            letterSpacing = 1.2.sp
         )
     }
 }
@@ -384,17 +440,17 @@ fun CategoryItemCard(
                     onLongPress = { onLongClick() }
                 )
             },
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = if (isSelected) Color(0xFFEAF2EE) else Color(0xFFF9FAF9),
-        border = if (isSelected) BorderStroke(2.dp, Color(0xFF2D6A4F)) else null
+        border = if (isSelected) BorderStroke(1.5.dp, Color(0xFF2D6A4F)) else BorderStroke(1.dp, Color(0xFFEEEEEE))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(
                         if (isSelected) Color(0xFF2D6A4F) 
@@ -408,39 +464,39 @@ fun CategoryItemCard(
                         Icons.Default.Check,
                         contentDescription = "Selected",
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 } else if (isDone) {
                     Icon(
                         Icons.Default.CheckCircle,
                         contentDescription = "Done",
                         tint = Color(0xFF2D6A4F),
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 } else if (iconRes != null) {
                     Icon(
                         painter = painterResource(id = iconRes),
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         tint = Color(0xFF2D6A4F)
                     )
                 } else if (icon != null) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         tint = Color(0xFF2D6A4F)
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(14.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
                     color = if (isDone) Color.Gray else Color.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -450,8 +506,9 @@ fun CategoryItemCard(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
                     color = if (isUrgent) Color(0xFFC0392B) else if (isDone) Color(0xFF2D6A4F) else Color.Gray,
-                    fontWeight = if (isUrgent || isDone) FontWeight.Medium else FontWeight.Normal
+                    fontWeight = if (isUrgent || isDone) FontWeight.Bold else FontWeight.Normal
                 )
             }
             

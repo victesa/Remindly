@@ -1,0 +1,3 @@
+-keepattributes Signature, InnerClasses, EnclosingMethod
+-keep class com.victorkirui.core.model.** { *; }
+-keepclassmembers class com.victorkirui.core.model.** { *; }

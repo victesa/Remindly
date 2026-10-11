@@ -20,7 +20,8 @@ class CategoryDetailViewModel(
     private val _categoryName = MutableStateFlow("")
     
     val uiState: StateFlow<CategoryDetailUiState> = authRepository.currentUser.flatMapLatest { user ->
-        val userId = user?.uid ?: ""
+        val firebaseUser = user ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        val userId = firebaseUser?.uid ?: ""
         _categoryName.flatMapLatest { name ->
             when {
                 userId.isEmpty() -> flowOf(CategoryDetailUiState.Idle)
@@ -36,6 +37,12 @@ class CategoryDetailViewModel(
                         // Show items that are processed but have no category
                         val items = all.filter { it.category.isNullOrBlank() && it.status != "PENDING" && it.status != "DONE" }
                         CategoryDetailUiState.Success(name, items)
+                    }
+                }
+                name == "HISTORY" -> {
+                    localRepository.getAllItems(userId).map { all ->
+                        val historyItems = all.filter { it.status == "DONE" }
+                        CategoryDetailUiState.Success(name, historyItems)
                     }
                 }
                 else -> {

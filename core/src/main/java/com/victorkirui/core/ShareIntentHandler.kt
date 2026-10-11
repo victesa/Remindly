@@ -15,7 +15,9 @@ class ShareIntentHandler {
         val extraText = intent.getStringExtra(Intent.EXTRA_TEXT)
         val extractedUrl = extraText?.let { extractUrl(it) }
 
-        android.util.Log.d("ShareIntentHandler", "handleIntent: action=$action, type=$type, source=$source, extraText=$extraText")
+        val resolvedSource = resolveSource(source, extractedUrl, type)
+
+        android.util.Log.d("ShareIntentHandler", "handleIntent: action=$action, type=$type, rawSource=$source, resolvedSource=$resolvedSource, extraText=$extraText")
 
         return when (action) {
             Intent.ACTION_SEND -> {
@@ -27,22 +29,70 @@ class ShareIntentHandler {
 
                 when {
                     isImage && uri != null -> {
-                        ShareContent.Image(uri.toString(), source, extractedUrl)
+                        ShareContent.Image(uri.toString(), resolvedSource, extractedUrl)
                     }
                     isPdf && uri != null -> {
-                        ShareContent.Pdf(uri.toString(), source, extractedUrl)
+                        ShareContent.Pdf(uri.toString(), resolvedSource, extractedUrl)
                     }
                     uri != null -> {
                         // Fallback: If it's a URI we don't recognize, treat it as a PDF/Document for now
-                        ShareContent.Pdf(uri.toString(), source, extractedUrl)
+                        ShareContent.Pdf(uri.toString(), resolvedSource, extractedUrl)
                     }
                     extraText != null -> {
-                        ShareContent.Text(extraText, source)
+                        ShareContent.Text(extraText, resolvedSource)
                     }
                     else -> ShareContent.Unknown
                 }
             }
             else -> ShareContent.Unknown
+        }
+    }
+
+    fun resolveSource(rawSource: String?, url: String?, type: String?): String {
+        if (!rawSource.isNullOrBlank() && !rawSource.equals("Unknown", ignoreCase = true) && !rawSource.equals("android", ignoreCase = true)) {
+            return rawSource
+        }
+
+        val domainSource = detectSourceFromUrl(url)
+        if (domainSource != null) return domainSource
+
+        return when {
+            type?.startsWith("image/") == true -> "Image"
+            type == "application/pdf" -> "PDF"
+            else -> "Capture"
+        }
+    }
+
+    fun detectSourceFromUrl(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        return try {
+            val uri = Uri.parse(url)
+            val host = uri.host?.lowercase() ?: return null
+
+            when {
+                host.contains("linkedin.com") || host.contains("lnkd.in") -> "LinkedIn"
+                host.contains("twitter.com") || host.contains("x.com") || host.contains("t.co") -> "Twitter"
+                host.contains("github.com") -> "GitHub"
+                host.contains("youtube.com") || host.contains("youtu.be") -> "YouTube"
+                host.contains("instagram.com") -> "Instagram"
+                host.contains("reddit.com") || host.contains("redd.it") -> "Reddit"
+                host.contains("medium.com") -> "Medium"
+                host.contains("facebook.com") || host.contains("fb.watch") -> "Facebook"
+                host.contains("tiktok.com") -> "TikTok"
+                host.contains("spotify.com") -> "Spotify"
+                host.contains("amazon.") || host.contains("amzn.to") -> "Amazon"
+                host.contains("gmail.com") || host.contains("mail.google.com") -> "Gmail"
+                else -> {
+                    val cleanHost = host.removePrefix("www.").substringBefore(".")
+                    if (cleanHost.length in 3..20) {
+                        cleanHost.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+                    } else {
+                        "Web"
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 

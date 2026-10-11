@@ -104,12 +104,10 @@ class EditItemViewModel(
         // 1. Validate Deadline
         if (state.deadline.isNotBlank()) {
             try {
-                // Try to parse both YYYY-MM-DD and human readable if possible, 
-                // but let's stick to standard validation for now.
                 val today = java.time.LocalDate.now()
-                val deadlineDate = java.time.LocalDate.parse(state.deadline)
+                val deadlineDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(state.deadline)
                 
-                if (deadlineDate.isBefore(today)) {
+                if (deadlineDate != null && deadlineDate.isBefore(today)) {
                     _uiState.value = state.copy(validationError = "Deadline cannot be in the past.")
                     return
                 }
@@ -123,10 +121,13 @@ class EditItemViewModel(
             val updatedMetadata = (item.metadata ?: emptyMap()).toMutableMap()
             updatedMetadata["location"] = state.location
 
+            val cleanEventDate = com.victorkirui.core.util.DateUtils.sanitizeEventDate(item.eventDate, state.deadline)
+
             val updatedItem = item.copy(
                 title = state.title,
                 organization = state.organization,
                 deadline = state.deadline,
+                eventDate = cleanEventDate,
                 summary = state.notes,
                 metadata = updatedMetadata
             )

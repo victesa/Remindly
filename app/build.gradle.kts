@@ -14,16 +14,16 @@ android {
         applicationId = "com.victorkirui.remindly"
         minSdk = 24
         targetSdk = 37
-        versionCode = 6
-        versionName = "2.1.0"
+        versionCode = 29
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             optimization {
                 enable = false
             }
@@ -54,6 +54,10 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.auth)
+    implementation("com.google.firebase:firebase-messaging")
+
+
+
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(platform(libs.androidx.compose.bom))

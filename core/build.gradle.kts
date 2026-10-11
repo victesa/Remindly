@@ -11,8 +11,10 @@ android {
 
     defaultConfig {
         minSdk = 24
+        consumerProguardFiles("consumer-rules.pro")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
 
         val localProperties = Properties()
         val localPropertiesFile = project.rootProject.file("local.properties")
@@ -41,12 +43,15 @@ android {
 }
 
 dependencies {
-    // Firebase
+    // Firebase & Auth
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.auth)
     implementation(libs.play.services.auth)
+    implementation(libs.androidx.credentialsManager)
+    implementation(libs.androidx.credentialsPlayServices)
+    implementation(libs.googleid)
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(platform(libs.androidx.compose.bom))
@@ -63,4 +68,6 @@ dependencies {
     implementation(libs.koin.android)
     implementation(libs.play.billing.ktx)
     implementation(libs.androidx.glance.appwidget)
+    implementation(libs.retrofit.converter.gson)
 }
+

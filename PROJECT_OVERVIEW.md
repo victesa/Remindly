@@ -20,7 +20,7 @@ Remindly is an AI-powered productivity assistant designed to eliminate manual da
 - **Dependency Injection:** Koin (Lightweight and Kotlin-first)
 - **Local Persistence:** Room Database with Flow and Coroutines.
 - **Networking:** Retrofit & OkHttp with Bearer Token authentication.
-- **Background Tasks:** WorkManager for offline synchronization.
+- **Background Tasks:** WorkManager for offline synchroniza6tion.
 - **Performance:** Native code integration with debug symbol mapping for advanced crash reporting.
 
 ---
@@ -37,7 +37,7 @@ Remindly is an AI-powered productivity assistant designed to eliminate manual da
 ## 4. Privacy & Data Handling
 - **Data Collection:** The app processes shared content (text, images, URLs), device locale, and timezone to accurately extract and set reminders.
 - **Authentication:** Managed via Firebase Auth; user profiles are protected and private.
-- **Cloud Processing:** Data is securely transmitted to a custom API endpoint (`v1/items/ingest`) for AI analysis. Content is used solely for extraction and not for third-party marketing.
+- **Cloud Processing:** Data is securely transmitted to a custom API endpoint (`v1/extract-data`) for AI analysis. Content is used solely for extraction and not for third-party marketing.
 - **Analytics:** Firebase Analytics and Crashlytics are used to monitor app health. No personal task content is included in these logs.
 - **Data Control:** Users can delete their captured items and account data at any time through the application settings.
 

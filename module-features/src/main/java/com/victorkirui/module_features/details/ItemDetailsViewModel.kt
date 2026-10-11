@@ -40,15 +40,29 @@ class ItemDetailsViewModel(
             combine(
                 localRepository.getItemFlow(id),
                 localRepository.getRemindersForItem(id),
-                subscriptionRepository.subscriptionTier
-            ) { item, reminders, tier ->
+                subscriptionRepository.subscriptionTier,
+                subscriptionRepository.isCalendarSyncEnabled
+            ) { item, reminders, tier, isCalendarSyncEnabled ->
                 if (item != null) {
-                    // Update sync URI from metadata if available
-                    val syncedUri = item.metadata?.get("calendar_event_uri")
+                    val syncedUri = item.metadata?.get("calendar_event_uri") ?: _lastSyncedEventUri.value
+                    val isAutoSync = isCalendarSyncEnabled && tier == SubscriptionTier.PREMIUM
+                    val isSynced = isAutoSync || syncedUri != null || item.metadata?.get("google_calendar_synced") == "true"
+
                     if (syncedUri != null && _lastSyncedEventUri.value == null) {
                         _lastSyncedEventUri.value = syncedUri
                     }
-                    ItemDetailsUiState.Success(item, reminders, tier)
+
+                    if (isAutoSync && syncedUri == null && (item.eventDate != null || item.deadline != null)) {
+                        autoSyncItemToCalendar(item)
+                    }
+
+                    ItemDetailsUiState.Success(
+                        item = item,
+                        reminders = reminders,
+                        tier = tier,
+                        isCalendarSyncEnabled = isCalendarSyncEnabled,
+                        isSynced = isSynced
+                    )
                 } else {
                     ItemDetailsUiState.Error("Item not found")
                 }
@@ -86,7 +100,7 @@ class ItemDetailsViewModel(
 
             val today = LocalDate.now()
             val deadline = item.deadline
-            val isOverdue = deadline != null && try { LocalDate.parse(deadline).isBefore(today) } catch(e:Exception) { false }
+            val isOverdue = deadline != null && (com.victorkirui.core.util.DateUtils.parseToLocalDate(deadline)?.isBefore(today) == true)
 
             if (isOverdue) {
                 localRepository.deleteItem(userId, id)
@@ -158,10 +172,39 @@ class ItemDetailsViewModel(
             _calendarSyncResult.emit(uri != null)
         }
     }
+
+    private fun autoSyncItemToCalendar(item: Item) {
+        val eventDate = item.eventDate ?: item.deadline ?: return
+        viewModelScope.launch {
+            try {
+                val uri = calendarManager.addEvent(
+                    title = item.title,
+                    description = item.summary,
+                    eventDate = eventDate,
+                    location = item.metadata?.get("location") ?: item.organization
+                )
+                if (uri != null) {
+                    _lastSyncedEventUri.value = uri.toString()
+                    val updatedMetadata = (item.metadata ?: emptyMap()).toMutableMap()
+                    updatedMetadata["google_calendar_synced"] = "true"
+                    updatedMetadata["calendar_event_uri"] = uri.toString()
+                    localRepository.updateItem(item.copy(metadata = updatedMetadata))
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ItemDetailsViewModel", "Auto-sync to calendar failed: ${e.message}")
+            }
+        }
+    }
 }
 
 sealed class ItemDetailsUiState {
     object Loading : ItemDetailsUiState()
-    data class Success(val item: Item, val reminders: List<Reminder> = emptyList(), val tier: SubscriptionTier = SubscriptionTier.FREE) : ItemDetailsUiState()
+    data class Success(
+        val item: Item,
+        val reminders: List<Reminder> = emptyList(),
+        val tier: SubscriptionTier = SubscriptionTier.FREE,
+        val isCalendarSyncEnabled: Boolean = false,
+        val isSynced: Boolean = false
+    ) : ItemDetailsUiState()
     data class Error(val message: String) : ItemDetailsUiState()
 }

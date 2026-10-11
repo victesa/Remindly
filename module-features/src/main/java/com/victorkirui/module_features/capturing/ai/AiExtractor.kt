@@ -11,7 +11,8 @@ data class AiInput(
     val url: String? = null,
     val mediaUri: Uri?,
     val contentType: String,
-    val idempotencyKey: String
+    val idempotencyKey: String,
+    val source: String? = null
 )
 
 sealed class AiResult {

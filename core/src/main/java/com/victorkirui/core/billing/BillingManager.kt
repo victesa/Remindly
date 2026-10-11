@@ -16,6 +16,8 @@ import kotlinx.coroutines.launch
 class BillingManager(
     private val context: Context,
     private val subscriptionRepository: SubscriptionRepository,
+    private val authRepository: com.victorkirui.core.repository.AuthRepository,
+    private val purchaseVerifier: PurchaseVerifier,
     private val externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) : PurchasesUpdatedListener, BillingClientStateListener {
 
@@ -27,7 +29,12 @@ class BillingManager(
 
     private var billingClient: BillingClient = BillingClient.newBuilder(context)
         .setListener(this)
-        .enablePendingPurchases()
+        .enablePendingPurchases(
+            PendingPurchasesParams.newBuilder()
+                .enableOneTimeProducts()
+                .enablePrepaidPlans()
+                .build()
+        )
         .build()
 
     init {
@@ -46,7 +53,7 @@ class BillingManager(
             querySubscriptions()
             queryPurchases()
         } else {
-            Log.w(TAG, "Billing setup failed: ${billingResult.debugMessage}")
+            Log.w(TAG, "Billing setup failed [code ${billingResult.responseCode}]: ${billingResult.debugMessage}")
         }
     }
 
@@ -55,14 +62,15 @@ class BillingManager(
         startConnection()
     }
 
-    private fun querySubscriptions() {
+    fun querySubscriptions() {
+        if (!billingClient.isReady) {
+            startConnection()
+            return
+        }
+
         val productList = listOf(
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(PRODUCT_PRO_MONTHLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(PRODUCT_PRO_YEARLY)
+                .setProductId(PRODUCT_PRO_SUBSCRIPTION)
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build()
         )
@@ -71,12 +79,13 @@ class BillingManager(
             .setProductList(productList)
             .build()
 
-        billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsList ->
+        billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
             if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                Log.d(TAG, "Queried ${productDetailsList.size} subscription products.")
-                _productDetailsList.value = productDetailsList
+                val list = productDetailsResult.productDetailsList
+                Log.d(TAG, "Queried ${list.size} subscription products.")
+                _productDetailsList.value = list
             } else {
-                Log.w(TAG, "Query product details failed: ${billingResult.debugMessage}")
+                Log.w(TAG, "Query product details failed [code ${billingResult.responseCode}]: ${billingResult.debugMessage}")
             }
         }
     }
@@ -90,23 +99,43 @@ class BillingManager(
 
         billingClient.queryPurchasesAsync(params) { billingResult, purchases ->
             if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                var hasActiveSubscription = false
+                var hasActivePurchases = false
                 for (purchase in purchases) {
                     if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
-                        hasActiveSubscription = true
+                        hasActivePurchases = true
                         handlePurchase(purchase)
                     }
                 }
-                externalScope.launch {
-                    val targetTier = if (hasActiveSubscription) SubscriptionTier.PREMIUM else SubscriptionTier.FREE
-                    subscriptionRepository.setSubscriptionTier(targetTier)
+                if (!hasActivePurchases) {
+                    externalScope.launch {
+                        Log.d(TAG, "No active Play Store purchases found on device. Verifying backend profile...")
+                        try {
+                            val profile = purchaseVerifier.getUserProfile()
+                            if (profile != null && profile.success) {
+                                val targetTier = if (profile.isProUser) SubscriptionTier.PREMIUM else SubscriptionTier.FREE
+                                subscriptionRepository.setSubscriptionTier(targetTier)
+                                Log.d(TAG, "Synced tier from backend /v1/me: $targetTier")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to verify backend user profile on empty purchases: ${e.message}")
+                        }
+                    }
                 }
             }
         }
     }
 
-    fun launchBillingFlow(activity: Activity, productDetails: ProductDetails): Boolean {
-        val offerToken = productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken ?: ""
+    fun launchBillingFlow(
+        activity: Activity,
+        productDetails: ProductDetails,
+        basePlanId: String = BASE_PLAN_MONTHLY
+    ): Boolean {
+        val offerDetails = productDetails.subscriptionOfferDetails?.find {
+            it.basePlanId == basePlanId
+        } ?: productDetails.subscriptionOfferDetails?.firstOrNull()
+
+        val offerToken = offerDetails?.offerToken ?: ""
+
         val productDetailsParamsList = listOf(
             BillingFlowParams.ProductDetailsParams.newBuilder()
                 .setProductDetails(productDetails)
@@ -114,25 +143,57 @@ class BillingManager(
                 .build()
         )
 
-        val flowParams = BillingFlowParams.newBuilder()
+        val flowParamsBuilder = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(productDetailsParamsList)
-            .build()
 
-        val responseCode = billingClient.launchBillingFlow(activity, flowParams).responseCode
+        val uid = authRepository.currentUser.value?.uid
+        if (!uid.isNullOrBlank()) {
+            flowParamsBuilder.setObfuscatedAccountId(uid)
+        }
+
+        val responseCode = billingClient.launchBillingFlow(activity, flowParamsBuilder.build()).responseCode
         return responseCode == BillingClient.BillingResponseCode.OK
+    }
+
+    fun resetBillingState() {
+        _billingState.value = BillingState.Idle
     }
 
     override fun onPurchasesUpdated(billingResult: BillingResult, purchases: List<Purchase>?) {
         when (billingResult.responseCode) {
             BillingClient.BillingResponseCode.OK -> {
-                purchases?.forEach { handlePurchase(it) }
-                _billingState.value = BillingState.PurchaseSuccess
+                if (purchases.isNullOrEmpty()) {
+                    Log.d(TAG, "onPurchasesUpdated received OK with empty purchases list.")
+                    return
+                }
+
+                var hasPending = false
+                var hasPurchased = false
+                purchases.forEach { purchase ->
+                    if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
+                        hasPending = true
+                    } else if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                        hasPurchased = true
+                        handlePurchase(purchase)
+                    }
+                }
+
+                if (hasPending) {
+                    _billingState.value = BillingState.PurchasePending
+                } else if (hasPurchased) {
+                    _billingState.value = BillingState.PurchaseVerifying
+                }
             }
             BillingClient.BillingResponseCode.USER_CANCELED -> {
                 _billingState.value = BillingState.UserCanceled
             }
             else -> {
-                _billingState.value = BillingState.Error(billingResult.debugMessage)
+                val errorMsg = if (billingResult.debugMessage.isNotBlank()) {
+                    billingResult.debugMessage
+                } else {
+                    "Payment was not completed (${billingResult.responseCode}). Please try again."
+                }
+                _billingState.value = BillingState.Error(errorMsg)
             }
         }
     }
@@ -145,27 +206,69 @@ class BillingManager(
                     .build()
                 billingClient.acknowledgePurchase(acknowledgePurchaseParams) { billingResult ->
                     if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        Log.d(TAG, "Purchase acknowledged successfully.")
+                        Log.d(TAG, "Purchase acknowledged successfully on client.")
                     }
                 }
             }
 
             externalScope.launch {
-                subscriptionRepository.setSubscriptionTier(SubscriptionTier.PREMIUM)
+                val productId = purchase.products.firstOrNull() ?: PRODUCT_PRO_SUBSCRIPTION
+                Log.d(TAG, "Sending purchase verification to backend: productId=$productId, token=${purchase.purchaseToken}")
+
+                var verified = false
+                var attempts = 0
+                val maxAttempts = 3
+                var delayMs = 1000L
+
+                while (!verified && attempts < maxAttempts) {
+                    attempts++
+                    try {
+                        val response = purchaseVerifier.verifyPurchase(purchase.purchaseToken, productId)
+                        if (response.success && response.entitlement != null) {
+                            val tierStr = response.entitlement.tier ?: "free"
+                            val statusStr = response.entitlement.status?.lowercase() ?: "active"
+                            val isPro = (tierStr.equals("pro", ignoreCase = true) || tierStr.equals("premium", ignoreCase = true)) &&
+                                    statusStr != "expired" && statusStr != "canceled_expired"
+                            val targetTier = if (isPro) SubscriptionTier.PREMIUM else SubscriptionTier.FREE
+                            subscriptionRepository.setSubscriptionTier(targetTier)
+                            Log.d(TAG, "Backend purchase verification successful (attempt $attempts): tier=$targetTier")
+                            verified = true
+                        } else {
+                            Log.w(TAG, "Backend verification returned failure or no entitlement (attempt $attempts): ${response.message}")
+                            if (attempts < maxAttempts) kotlinx.coroutines.delay(delayMs)
+                            delayMs *= 2
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Backend verification exception (attempt $attempts): ${e.message}")
+                        if (attempts < maxAttempts) kotlinx.coroutines.delay(delayMs)
+                        delayMs *= 2
+                    }
+                }
+
+                // If backend verification timed out or didn't confirm within 3 attempts, trust Google Play PURCHASED state and grant PREMIUM
+                if (!verified) {
+                    Log.w(TAG, "Backend verification pending/timed out. Trusting Play Store PURCHASED status and granting PREMIUM tier.")
+                    subscriptionRepository.setSubscriptionTier(SubscriptionTier.PREMIUM)
+                }
+
+                _billingState.value = BillingState.PurchaseSuccess
             }
         }
     }
 
     companion object {
         private const val TAG = "BillingManager"
-        const val PRODUCT_PRO_MONTHLY = "remindly_pro_monthly"
-        const val PRODUCT_PRO_YEARLY = "remindly_pro_yearly"
+        const val PRODUCT_PRO_SUBSCRIPTION = "remindly"
+        const val BASE_PLAN_MONTHLY = "monthly-plan"
+        const val BASE_PLAN_YEARLY = "yearly-plan"
     }
 }
 
 sealed class BillingState {
     object Idle : BillingState()
+    object PurchaseVerifying : BillingState()
     object PurchaseSuccess : BillingState()
+    object PurchasePending : BillingState()
     object UserCanceled : BillingState()
     data class Error(val message: String) : BillingState()
 }

@@ -29,6 +29,6 @@ val localModule = module {
     single { get<RemindlyDatabase>().pendingSyncDao() }
     single { get<RemindlyDatabase>().pendingDeletionDao() }
     single { get<RemindlyDatabase>().reminderDao() }
-    single<LocalRepository> { LocalRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<LocalRepository> { LocalRepositoryImpl(get(), get(), get(), get(), get(), getOrNull()) }
     single<com.victorkirui.core.data.DataClearer> { get<LocalRepository>() }
 }

@@ -22,7 +22,8 @@ import androidx.compose.ui.window.DialogProperties
 @Composable
 fun CapturingDialog(
     uiState: CapturingUiState,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onViewPlans: () -> Unit = {}
 ) {
     if (uiState is CapturingUiState.Idle) return
 
@@ -188,7 +189,13 @@ fun CapturingDialog(
                 ) {
                     Spacer(modifier = Modifier.height(32.dp))
                     Button(
-                        onClick = onDismiss,
+                        onClick = {
+                            if (uiState is CapturingUiState.UpgradeRequired) {
+                                onViewPlans()
+                            } else {
+                                onDismiss()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = when (uiState) {

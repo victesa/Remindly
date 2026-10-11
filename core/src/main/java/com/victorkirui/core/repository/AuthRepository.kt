@@ -11,13 +11,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 
+data class AuthUserResult(
+    val user: FirebaseUser,
+    val isNewUser: Boolean = false
+)
+
 interface AuthRepository {
     val currentUser: StateFlow<FirebaseUser?>
-    suspend fun signUp(email: String, password: String, name: String): Result<FirebaseUser>
-    suspend fun signIn(email: String, password: String): Result<FirebaseUser>
-    suspend fun signInWithGoogle(idToken: String): Result<FirebaseUser>
+    suspend fun signUp(email: String, password: String, name: String): Result<AuthUserResult>
+    suspend fun signIn(email: String, password: String): Result<AuthUserResult>
+    suspend fun signInWithGoogle(idToken: String): Result<AuthUserResult>
     suspend fun sendPasswordResetEmail(email: String): Result<Unit>
-    suspend fun signOut(clearData: Boolean = false)
+    suspend fun signOut(clearData: Boolean = true)
     suspend fun deleteAccount(): Result<Unit>
     suspend fun getIdToken(forceRefresh: Boolean = false): String?
     suspend fun updateDisplayName(name: String): Result<Unit>
@@ -27,7 +32,8 @@ class FirebaseAuthRepository(
     private val context: android.content.Context,
     private val analytics: Analytics,
     private val crashReporter: CrashReporter,
-    private val dataClearers: List<DataClearer> = emptyList()
+    private val dataClearers: List<DataClearer> = emptyList(),
+    private val onPurgeRemoteAccount: (suspend () -> Unit)? = null
 ) : AuthRepository {
     private val auth = FirebaseAuth.getInstance()
     private val _currentUser = MutableStateFlow(auth.currentUser)
@@ -35,7 +41,7 @@ class FirebaseAuthRepository(
 
     init {
         auth.addAuthStateListener {
-            val user = it.currentUser
+            val user = it.currentUser ?: auth.currentUser
             val current = _currentUser.value
             if (user != null) {
                 if (current?.uid == user.uid && !current.displayName.isNullOrBlank() && user.displayName.isNullOrBlank()) {
@@ -49,9 +55,14 @@ class FirebaseAuthRepository(
                 _currentUser.value = null
             }
         }
+        auth.currentUser?.let { user ->
+            if (_currentUser.value == null) {
+                _currentUser.value = user
+            }
+        }
     }
 
-    override suspend fun signUp(email: String, password: String, name: String): Result<FirebaseUser> {
+    override suspend fun signUp(email: String, password: String, name: String): Result<AuthUserResult> {
         return try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
             val user = result.user ?: throw Exception("Sign up failed")
@@ -66,30 +77,32 @@ class FirebaseAuthRepository(
             
             val refreshedUser = auth.currentUser ?: user
             _currentUser.value = refreshedUser
-            Result.success(refreshedUser)
+            Result.success(AuthUserResult(refreshedUser, isNewUser = true))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    override suspend fun signIn(email: String, password: String): Result<FirebaseUser> {
+    override suspend fun signIn(email: String, password: String): Result<AuthUserResult> {
         return try {
             val result = auth.signInWithEmailAndPassword(email, password).await()
             val user = result.user ?: throw Exception("Sign in failed")
+            val isNew = result.additionalUserInfo?.isNewUser ?: false
             _currentUser.value = user
-            Result.success(user)
+            Result.success(AuthUserResult(user, isNewUser = isNew))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    override suspend fun signInWithGoogle(idToken: String): Result<FirebaseUser> {
+    override suspend fun signInWithGoogle(idToken: String): Result<AuthUserResult> {
         return try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             val result = auth.signInWithCredential(credential).await()
             val user = result.user ?: throw Exception("Google sign in failed")
+            val isNew = result.additionalUserInfo?.isNewUser ?: false
             _currentUser.value = user
-            Result.success(user)
+            Result.success(AuthUserResult(user, isNewUser = isNew))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -105,11 +118,22 @@ class FirebaseAuthRepository(
     }
 
     override suspend fun signOut(clearData: Boolean) {
-        val userId = auth.currentUser?.uid
-        auth.signOut()
+        val userId = auth.currentUser?.uid ?: ""
         
-        if (clearData && userId != null) {
-            dataClearers.forEach { it.clearUserData(userId) }
+        if (clearData) {
+            dataClearers.forEach { 
+                try {
+                    it.clearUserData(userId)
+                } catch (e: Exception) {
+                    android.util.Log.e("AuthRepository", "Error clearing user data during signOut: ${e.message}", e)
+                }
+            }
+        }
+
+        try {
+            auth.signOut()
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Error during FirebaseAuth signOut: ${e.message}", e)
         }
         
         try {
@@ -128,6 +152,13 @@ class FirebaseAuthRepository(
             val user = auth.currentUser ?: throw Exception("No user is currently logged in.")
             val userId = user.uid
             
+            // Purge remote database data on backend worker first
+            try {
+                onPurgeRemoteAccount?.invoke()
+            } catch (e: Exception) {
+                android.util.Log.w("AuthRepository", "Failed to purge remote account data: ${e.message}")
+            }
+
             // Delete user in Firebase Auth
             user.delete().await()
             

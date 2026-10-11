@@ -43,6 +43,7 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun showNotification(title: String, message: String, itemId: String? = null, notificationId: Int? = null) {
         Log.d("NotificationHelper", "Request to show notification: $title - $message, itemId: $itemId")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -94,6 +95,98 @@ class NotificationHelper(private val context: Context) {
 
         with(NotificationManagerCompat.from(context)) {
             notify(finalId, builder.build())
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun showPromoNotification(
+        title: String,
+        message: String,
+        promoCode: String = "ANDROID254",
+        showDialog: Boolean = true,
+        notificationId: Int? = null
+    ) {
+        Log.d("NotificationHelper", "Showing promo notification: $title - $message, code: $promoCode")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.e("NotificationHelper", "Missing POST_NOTIFICATIONS permission")
+                return
+            }
+        }
+
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("SHOW_PROMO_DIALOG", showDialog)
+            putExtra("PROMO_CODE", promoCode)
+            putExtra("PROMO_TITLE", title)
+            putExtra("PROMO_MESSAGE", message)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            promoCode.hashCode() + title.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        val finalId = notificationId ?: (promoCode.hashCode() + title.hashCode())
+        with(NotificationManagerCompat.from(context)) {
+            notify(finalId, builder.build())
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun showQuotaExhaustedNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.e("NotificationHelper", "Missing POST_NOTIFICATIONS permission")
+                return
+            }
+        }
+
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("OPEN_PAYWALL", true)
+            putExtra("EXTRA_OPEN_PAYWALL", true)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            9991,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Monthly Capture Limit Reached ⚠️")
+            .setContentText("You've reached your monthly AI extraction limit. Upgrade to Remindly Pro for 250 monthly extractions.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        with(NotificationManagerCompat.from(context)) {
+            notify(9991, builder.build())
         }
     }
 }

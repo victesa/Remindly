@@ -33,6 +33,14 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import android.content.Intent
+import android.net.Uri
+
+
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -468,9 +476,61 @@ private fun SignInForm(
             )
         }
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        val context = LocalContext.current
+        val annotatedTermsString = remember {
+            buildAnnotatedString {
+                append("By signing in, you agree to our ")
+                
+                pushStringAnnotation(
+                    tag = "TERMS",
+                    annotation = "https://victor-kirui.dev/remindly/terms-and-conditions"
+                )
+                withStyle(SpanStyle(color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)) {
+                    append("Terms & Conditions")
+                }
+                pop()
+
+                append(" and ")
+
+                pushStringAnnotation(
+                    tag = "PRIVACY",
+                    annotation = "https://victor-kirui.dev/remindly/privacy-policy"
+                )
+                withStyle(SpanStyle(color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)) {
+                    append("Privacy Policy")
+                }
+                pop()
+
+                append(".")
+            }
+        }
+
+        ClickableText(
+            text = annotatedTermsString,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = Color.Gray,
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { offset ->
+                annotatedTermsString.getStringAnnotations(offset, offset).firstOrNull()?.let { annotation ->
+                    try {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse(annotation.item)
+                        )
+                        context.startActivity(intent)
+                    } catch (_: Exception) {}
+                }
+            }
+        )
+
         Spacer(modifier = Modifier.height(48.dp))
     }
 }
+
 
 @Preview(showBackground = true, device = "spec:width=1280dp,height=800dp,dpi=240")
 @Composable

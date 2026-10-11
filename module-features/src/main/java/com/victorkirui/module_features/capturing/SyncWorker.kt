@@ -77,8 +77,9 @@ class SyncWorker(
                     url = item.sourceUrl,
                     mediaUri = if (item.contentType == "DOCUMENT") null else mediaUri, // Rule: Do not upload raw PDF as image
                     contentType = item.contentType,
-                    idempotencyKey = item.id 
+                    idempotencyKey = "${item.id}_${System.currentTimeMillis()}"
                 )
+
 
                 val result = aiExtractor.extract(aiInput)
                 
@@ -91,16 +92,13 @@ class SyncWorker(
                 }
 
                 if (result is com.victorkirui.module_features.capturing.ai.AiResult.Success) {
-                    val deadlineDateTime = result.deadline?.let { DateUtils.parseToDateTime(it) }
-                    val now = java.time.LocalDateTime.now()
-                    if (deadlineDateTime != null && deadlineDateTime.isBefore(now)) {
-                        android.util.Log.d("SyncWorker", "Item ${item.id} past deadline during sync. Deleting.")
-                        localRepository.withTransaction {
-                            localRepository.deleteItem(item.userId, item.id)
-                            localRepository.removePendingSync(item.id)
-                        }
-                        continue
+                    val cleanDeadline = result.deadline?.takeIf { 
+                        it.isNotBlank() && !it.equals("null", ignoreCase = true) && !it.equals("none", ignoreCase = true) && !it.equals("n/a", ignoreCase = true)
                     }
+                    val rawEventDate = result.eventDate?.takeIf { 
+                        it.isNotBlank() && !it.equals("null", ignoreCase = true) && !it.equals("none", ignoreCase = true) && !it.equals("n/a", ignoreCase = true)
+                    }
+                    val cleanEventDate = DateUtils.sanitizeEventDate(rawEventDate, cleanDeadline)
 
                     val updatedMetadata = (item.metadata ?: emptyMap()).toMutableMap().apply {
                         put("strategy", result.strategy)
@@ -113,8 +111,8 @@ class SyncWorker(
                         title = result.title,
                         summary = result.summary,
                         category = result.category ?: "OTHER",
-                        deadline = result.deadline,
-                        eventDate = result.eventDate,
+                        deadline = cleanDeadline,
+                        eventDate = cleanEventDate,
                         organization = result.organization,
                         checklist = result.checklist,
                         status = "READY",

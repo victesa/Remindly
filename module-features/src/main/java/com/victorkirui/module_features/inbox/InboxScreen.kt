@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,7 +63,7 @@ fun InboxScreen(
         uiState = uiState,
         onCategorySelected = { categoryId ->
             viewModel.selectCategory(categoryId)
-            if (windowWidthSizeClass == WindowWidthSizeClass.Compact) {
+            if (windowWidthSizeClass != WindowWidthSizeClass.Expanded) {
                 val encodedCategory = java.net.URLEncoder.encode(categoryId, "UTF-8")
                 onNavigateToCategory(encodedCategory)
             }
@@ -76,6 +77,8 @@ fun InboxScreen(
         onNavigateToReminders = onNavigateToReminders,
         onNavigateToProfile = onNavigateToProfile,
         onDeleteItem = { itemId -> viewModel.deleteItem(itemId) },
+        onDeleteItems = { itemIds -> viewModel.deleteItems(itemIds) },
+        onMarkItemsAsDone = { itemIds -> viewModel.markItemsAsDone(itemIds) },
         searchQuery = (uiState as? InboxUiState.Success)?.searchQuery ?: "",
         onSearchQueryChange = { query -> viewModel.onSearchQueryChange(query) }
     )
@@ -94,7 +97,9 @@ fun InboxScreenContent(
     onNavigateToHome: () -> Unit = {},
     onNavigateToReminders: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
-    onDeleteItem: (String) -> Unit = {}
+    onDeleteItem: (String) -> Unit = {},
+    onDeleteItems: (Set<String>) -> Unit = {},
+    onMarkItemsAsDone: (Set<String>) -> Unit = {}
 ) {
     val isLargeScreen = windowWidthSizeClass == WindowWidthSizeClass.Expanded
     val isMediumScreen = windowWidthSizeClass == WindowWidthSizeClass.Medium
@@ -110,11 +115,18 @@ fun InboxScreenContent(
         Scaffold(
             topBar = {
                 if (isSelectionMode) {
-                    CenterAlignedTopAppBar(
-                        title = { Text("${selectedCategories.size} selected") },
+                    TopAppBar(
+                        title = {
+                            Text(
+                                "${selectedCategories.size} selected",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                        },
                         navigationIcon = {
                             IconButton(onClick = { selectedCategories = emptySet() }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear selection")
+                                Icon(Icons.Default.Close, contentDescription = "Clear selection", tint = Color.Black)
                             }
                         },
                         actions = {
@@ -123,15 +135,23 @@ fun InboxScreenContent(
                                 val allVisibleIds = state.categories.map { it.id }.toSet()
                                 val isAllSelected = selectedCategories.size == allVisibleIds.size
                                 
-                                IconButton(onClick = {
-                                    selectedCategories = if (isAllSelected) emptySet() else allVisibleIds
-                                }) {
-                                    Icon(
-                                        if (isAllSelected) Icons.Default.SelectAll else Icons.Outlined.SelectAll,
-                                        contentDescription = "Select all"
+                                FilledTonalButton(
+                                    onClick = {
+                                        selectedCategories = if (isAllSelected) emptySet() else allVisibleIds
+                                    },
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = Color(0xFFEAF2EE),
+                                        contentColor = Color(0xFF2D6A4F)
+                                    )
+                                ) {
+                                    Text(
+                                        if (isAllSelected) "Deselect All" else "Select All",
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
                             }
+
+                            Spacer(modifier = Modifier.width(4.dp))
 
                             var showConfirmDelete by remember { mutableStateOf(false) }
                             if (showConfirmDelete) {
@@ -156,12 +176,18 @@ fun InboxScreenContent(
                                 )
                             }
                             IconButton(onClick = { showConfirmDelete = true }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete selected")
+                                Icon(
+                                    Icons.Default.Delete, 
+                                    contentDescription = "Delete selected",
+                                    tint = Color(0xFFC0392B)
+                                )
                             }
                         },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color(0xFFEAF2EE),
-                            titleContentColor = Color(0xFF2D6A4F)
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.White,
+                            titleContentColor = Color.Black,
+                            navigationIconContentColor = Color.Black,
+                            actionIconContentColor = Color.Black
                         )
                     )
                 }
@@ -176,7 +202,7 @@ fun InboxScreenContent(
                         }
                     }
                     is InboxUiState.Success -> {
-                        if (isLargeScreen || isMediumScreen) {
+                        if (isLargeScreen) {
                             LargeScreenInboxLayout(
                                 categories = state.categories,
                                 items = state.items,
@@ -201,7 +227,10 @@ fun InboxScreenContent(
                                     }
                                 },
                                 onItemClick = onNavigateToItem,
-                                onDeleteItem = onDeleteItem
+                                onDeleteItem = onDeleteItem,
+                                onDeleteItems = onDeleteItems,
+                                onMarkItemsAsDone = onMarkItemsAsDone,
+                                isMediumScreen = isMediumScreen
                             )
                         } else {
                             SmallScreenInboxLayout(
@@ -283,6 +312,7 @@ fun SmallScreenInboxLayout(
                     CategoryItemCard(
                         category = category,
                         isSelected = isMultiSelected,
+                        isMultiSelected = isMultiSelected,
                         onClick = { onCategoryClick(category.id) },
                         onLongClick = { onCategoryLongClick(category.id) }
                     )
@@ -290,13 +320,59 @@ fun SmallScreenInboxLayout(
             }
         } else {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "No categories yet. Start capturing!",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
+                InboxEmptyCard(
+                    title = "No categories yet",
+                    subtitle = "Captures and notes will appear here organized by category."
                 )
             }
         }
+    }
+}
+
+@Composable
+fun InboxEmptyCard(
+    title: String = "No captures yet",
+    subtitle: String = "Captured notes, documents, and web links will appear here organized by category."
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFEAF2EE)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Inbox,
+                contentDescription = null,
+                tint = Color(0xFF2D6A4F),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.Black
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
     }
 }
 
@@ -311,51 +387,91 @@ fun LargeScreenInboxLayout(
     onCategorySelected: (String) -> Unit,
     onCategoryLongClick: (String) -> Unit,
     onItemClick: (String) -> Unit,
-    onDeleteItem: (String) -> Unit = {}
+    onDeleteItem: (String) -> Unit = {},
+    onDeleteItems: (Set<String>) -> Unit = {},
+    onMarkItemsAsDone: (Set<String>) -> Unit = {},
+    isMediumScreen: Boolean = false
 ) {
+    var selectedItemIds by remember(selectedCategoryId) { mutableStateOf(setOf<String>()) }
+    val isItemSelectionMode = selectedItemIds.isNotEmpty()
+    var showConfirmDeleteDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(categories, selectedCategoryId) {
+        if (selectedCategoryId == null && categories.isNotEmpty()) {
+            onCategorySelected(categories.first().id)
+        }
+    }
+
+    if (showConfirmDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDeleteDialog = false },
+            title = { Text("Delete ${selectedItemIds.size} captures?") },
+            text = { Text("Selected captures will be permanently deleted. This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteItems(selectedItemIds)
+                    selectedItemIds = emptySet()
+                    showConfirmDeleteDialog = false
+                }) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Row(modifier = Modifier.fillMaxSize()) {
-        // Master Pane (Category List)
+        // Master Sidebar (Category List)
         Column(
             modifier = Modifier
-                .width(360.dp)
+                .fillMaxWidth(if (isMediumScreen) 0.36f else 0.32f)
                 .fillMaxHeight()
-                .padding(horizontal = 24.dp, vertical = 32.dp)
+                .background(Color(0xFFF7F8F7))
+                .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
             Text(
                 "Inbox",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color.Black
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            SearchField(
-                placeholder = "Search your captures...",
-                text = searchQuery,
-                onValueChange = onSearchQueryChange
+                color = Color.Black,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            SearchField(
+                placeholder = "Search captures...",
+                text = searchQuery,
+                onValueChange = onSearchQueryChange
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
             Text(
                 "${categories.sumOf { it.count }} items across ${categories.size} categories",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
+                color = Color.Gray,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             
             if (categories.isNotEmpty()) {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(categories) { category ->
                         val isMultiSelected = selectedCategories.contains(category.id)
+                        val isViewing = category.id == selectedCategoryId
                         CategoryItemCard(
                             category = category,
-                            isSelected = category.id == selectedCategoryId || isMultiSelected,
+                            isSelected = isViewing,
+                            isMultiSelected = isMultiSelected,
                             onClick = { onCategorySelected(category.id) },
                             onLongClick = { onCategoryLongClick(category.id) }
                         )
@@ -363,10 +479,9 @@ fun LargeScreenInboxLayout(
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No categories",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
+                    InboxEmptyCard(
+                        title = "No categories",
+                        subtitle = "Captures will appear here"
                     )
                 }
             }
@@ -375,7 +490,7 @@ fun LargeScreenInboxLayout(
         // Vertical Divider
         VerticalDivider(
             thickness = 1.dp,
-            color = Color.LightGray.copy(alpha = 0.3f)
+            color = Color.LightGray.copy(alpha = 0.2f)
         )
 
         // Detail Pane (Items List)
@@ -383,102 +498,125 @@ fun LargeScreenInboxLayout(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .padding(horizontal = 32.dp, vertical = 32.dp)
+                .background(Color.White)
+                .padding(horizontal = 28.dp, vertical = 24.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        if (selectedCategoryId == "PENDING_SYNC") "Pending Sync" else (selectedCategoryId ?: "Select a Category"),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black
-                    )
-                }
-                
-                IconButton(onClick = { /* Search within category */ }) {
-                    Icon(Icons.Default.Search, contentDescription = "Search", modifier = Modifier.size(28.dp))
+                if (isItemSelectionMode) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        IconButton(onClick = { selectedItemIds = emptySet() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear selection")
+                        }
+                        Text(
+                            "${selectedItemIds.size} selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                onMarkItemsAsDone(selectedItemIds)
+                                selectedItemIds = emptySet()
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFFEAF2EE),
+                                contentColor = Color(0xFF2D6A4F)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Check, 
+                                contentDescription = null, 
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mark Done")
+                        }
+
+                        IconButton(onClick = { showConfirmDeleteDialog = true }) {
+                            Icon(
+                                Icons.Default.Delete, 
+                                contentDescription = "Delete selected",
+                                tint = Color(0xFFC0392B)
+                            )
+                        }
+                    }
+                } else {
+                    Column {
+                        Text(
+                            if (selectedCategoryId == "PENDING_SYNC") "Pending Sync" else (selectedCategoryId ?: "Captures"),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                        val count = items.size
+                        Text(
+                            "$count ${if (count == 1) "capture" else "captures"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
                 }
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             
             if (items.isNotEmpty()) {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(items.chunked(2)) { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            rowItems.forEach { item ->
-                                var showDeleteDialog by remember { mutableStateOf(false) }
-
-                                if (showDeleteDialog) {
-                                    AlertDialog(
-                                        onDismissRequest = { showDeleteDialog = false },
-                                        title = { Text("Delete Capture") },
-                                        text = { Text("Are you sure you want to delete this capture? This action cannot be undone.") },
-                                        confirmButton = {
-                                            TextButton(onClick = { 
-                                                onDeleteItem(item.id)
-                                                showDeleteDialog = false 
-                                            }) {
-                                                Text("Delete", color = Color.Red)
-                                            }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = { showDeleteDialog = false }) {
-                                                Text("Cancel")
-                                            }
-                                        }
-                                    )
-                                }
-
-                                Box(modifier = Modifier.weight(1f)) {
-                                    CaptureItemCard(
-                                        item = item, 
-                                        onClick = { onItemClick(item.id) }
-                                    )
-                                    // Add a long-press or a small delete icon
-                                    IconButton(
-                                        onClick = { showDeleteDialog = true },
-                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DeleteOutline, 
-                                            contentDescription = "Delete",
-                                            tint = Color.Gray.copy(alpha = 0.5f),
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                    items(items) { item ->
+                        val isSelected = selectedItemIds.contains(item.id)
+                        CaptureItemCard(
+                            item = item,
+                            isSelected = isSelected,
+                            onClick = {
+                                if (isItemSelectionMode) {
+                                    selectedItemIds = if (isSelected) {
+                                        selectedItemIds - item.id
+                                    } else {
+                                        selectedItemIds + item.id
                                     }
+                                } else {
+                                    onItemClick(item.id)
                                 }
-                            }
-                            if (rowItems.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
+                            },
+                            onLongClick = {
+                                selectedItemIds = if (isSelected) {
+                                    selectedItemIds - item.id
+                                } else {
+                                    selectedItemIds + item.id
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             } else if (selectedCategoryId != null) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No items in this category",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
+                    InboxEmptyCard(
+                        title = "No items in this category",
+                        subtitle = "Captured notes or documents for $selectedCategoryId will appear here."
                     )
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Select a category to view items",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
+                    InboxEmptyCard(
+                        title = "Select a category",
+                        subtitle = "Click on any category on the left to view its captured items."
                     )
                 }
             }
@@ -506,30 +644,34 @@ fun ItemsGridRow(items: List<Item>, onItemClick: (String) -> Unit) {
 fun CategoryItemCard(
     category: InboxCategory,
     isSelected: Boolean,
+    isMultiSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(16.dp),
-        color = if (isSelected) Color.White else Color(0xFFF9FAF9),
-        border = if (isSelected) BorderStroke(1.5.dp, Color(0xFF2D6A4F)) else null
+        shape = RoundedCornerShape(20.dp),
+        color = when {
+            isMultiSelected -> Color(0xFFEAF2EE)
+            isSelected -> Color(0xFFEAF2EE)
+            else -> Color(0xFFF9FAF9)
+        },
+        border = if (isSelected || isMultiSelected) BorderStroke(1.5.dp, Color(0xFF2D6A4F)) else BorderStroke(1.dp, Color(0xFFEEEEEE))
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFEAF2EE)),
+                    .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -548,7 +690,7 @@ fun CategoryItemCard(
                 )
             }
             
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(14.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -568,62 +710,75 @@ fun CategoryItemCard(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    category.latestItemTitle,
+                    category.latestItemTitle.ifBlank { "${category.count} items" },
                     style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
                     color = Color.Gray,
-                    maxLines = 1
-                )
-            }
-            
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2D6A4F)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    category.count.toString(),
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             
             Spacer(modifier = Modifier.width(8.dp))
-            
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = Color.LightGray,
-                modifier = Modifier.size(20.dp)
-            )
+
+            if (isMultiSelected) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = Color(0xFF2D6A4F),
+                    modifier = Modifier.size(22.dp)
+                )
+            } else {
+                Surface(
+                    color = Color(0xFF2D6A4F),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        category.count.toString(),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CaptureItemCard(
     item: Item,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier
-            .height(100.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
-        color = Color(0xFFF9FAF9)
+            .fillMaxWidth()
+            .height(88.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) Color(0xFFEAF2EE) else Color(0xFFF9FAF9),
+        border = if (isSelected) BorderStroke(1.5.dp, Color(0xFF2D6A4F)) else BorderStroke(1.dp, Color(0xFFEEEEEE))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Brand/Source Icon
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(Color.White),
                 contentAlignment = Alignment.Center
@@ -634,48 +789,51 @@ fun CaptureItemCard(
                     Icon(
                         painter = painterResource(id = icon.resId),
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         tint = Color(0xFF2D6A4F)
                     )
                 } else if (icon is SourceIcon.Vector) {
                     Icon(
                         imageVector = icon.imageVector,
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         tint = Color(0xFF2D6A4F)
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(14.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     item.title,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = Color.Black
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        item.source ?: "Unknown",
+                        item.source ?: "Capture",
                         style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.sp,
                         color = Color.Gray
                     )
 
                     if (item.status == "PENDING") {
-                        Text(" · ", color = Color.Gray)
+                        Text(" · ", color = Color.Gray, fontSize = 11.sp)
                         Text(
                             "Sync Pending",
                             style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
                             color = Color(0xFF2D6A4F),
                             fontWeight = FontWeight.Medium
                         )
                     }
 
-                    Text(" · ", color = Color.Gray)
+                    Text(" · ", color = Color.Gray, fontSize = 11.sp)
                     
                     val deadlineValue = item.deadline
                     val isDone = item.status == "DONE"
@@ -684,27 +842,40 @@ fun CaptureItemCard(
                     } else if (deadlineValue != null) {
                         DateUtils.getDeadlineText(deadlineValue)
                     } else {
-                        "Saved · ${DateUtils.getTimeAgo(item.createdAt)}"
+                        DateUtils.getTimeAgo(item.createdAt)
                     }
                     
-                    val daysUntil = if (deadlineValue != null) ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadlineValue)) else Long.MAX_VALUE
+                    val deadlineDate = DateUtils.parseToLocalDate(deadlineValue)
+                    val daysUntil = if (deadlineDate != null) ChronoUnit.DAYS.between(LocalDate.now(), deadlineDate) else Long.MAX_VALUE
                     val isUrgent = !isDone && daysUntil <= 2
                     
                     Text(
                         deadlineText,
                         style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.sp,
                         color = if (isUrgent) Color(0xFFC0392B) else if (isDone) Color(0xFF2D6A4F) else Color.Gray,
-                        fontWeight = if (isUrgent || isDone) FontWeight.Medium else FontWeight.Normal
+                        fontWeight = if (isUrgent || isDone) FontWeight.Bold else FontWeight.Normal
                     )
                 }
             }
-            
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = Color.LightGray,
-                modifier = Modifier.size(20.dp)
-            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            if (isSelected) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = Color(0xFF2D6A4F),
+                    modifier = Modifier.size(24.dp)
+                )
+            } else {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Color.LightGray,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

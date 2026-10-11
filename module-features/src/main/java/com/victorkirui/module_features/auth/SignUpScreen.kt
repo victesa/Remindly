@@ -412,8 +412,9 @@ private fun SignUpForm(
                 
                 pushStringAnnotation(
                     tag = "TERMS",
-                    annotation = "https://victor-kirui.dev/remindly/terms"
+                    annotation = "https://victor-kirui.dev/remindly/terms-and-conditions"
                 )
+
                 withStyle(SpanStyle(color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)) {
                     append("Terms of Service")
                 }

@@ -17,17 +17,49 @@ import java.io.FileOutputStream
 
 class CaptureApiServiceImpl(
     private val api: CaptureApi,
-    private val context: Context
+    private val context: Context,
+    private val authRepository: com.victorkirui.core.repository.AuthRepository
 ) : CaptureApiService {
-    override suspend fun getQuota(): com.victorkirui.core.model.QuotaResponse {
-        return api.getQuota()
+    override suspend fun getMe(): com.victorkirui.core.model.UserProfileResponse {
+        return try {
+            val res = api.getMe()
+            Log.d("CaptureApiService", "GET /v1/me successful: success=${res.success}, tier=${res.tier}, isProUser=${res.isProUser}")
+            res
+        } catch (e: Exception) {
+            Log.e("CaptureApiService", "Failed GET /v1/me [${e.javaClass.name}]: ${e.message}", e)
+            com.victorkirui.core.model.UserProfileResponse(success = false, message = "${e.javaClass.name}: ${e.message}")
+        }
     }
 
-    override suspend fun getCaptures(): List<com.victorkirui.core.model.StoredReminderItem> {
-        val response = api.getItems()
+
+    override suspend fun getCaptures(limit: Int?): List<com.victorkirui.core.model.StoredReminderItem> {
+        val response = api.getItems(limit)
         val items = response.items ?: emptyList()
         Log.d("CaptureApiService", "GET /v1/items response: success=${response.success}, userId=${response.userId}, tier=${response.userTier}, count=${response.count}, itemsSize=${items.size}")
         return items
+    }
+
+
+    override suspend fun getSyncDeltas(since: String?): com.victorkirui.core.model.SyncDeltaResponse {
+        return try {
+            val response = api.getSyncDeltas(since)
+            Log.d("CaptureApiService", "GET /v1/items/sync response: success=${response.success}, timestamp=${response.syncTimestamp}, updatedCount=${response.updatedItems?.size}, deletedCount=${response.deletedItemIds?.size}")
+            response
+        } catch (e: Exception) {
+            Log.w("CaptureApiService", "GET /v1/items/sync endpoint not available or failed (${e.message}). Falling back to getCaptures().")
+            val fullItems = getCaptures()
+            val timestamp = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                java.time.Instant.now().toString()
+            } else {
+                java.util.Date().toString()
+            }
+            com.victorkirui.core.model.SyncDeltaResponse(
+                success = true,
+                syncTimestamp = timestamp,
+                updatedItems = fullItems,
+                deletedItemIds = emptyList()
+            )
+        }
     }
 
     override suspend fun updateItem(id: String, updates: Map<String, Any?>): Boolean {
@@ -57,6 +89,16 @@ class CaptureApiServiceImpl(
         } catch (e: Exception) {
             Log.e("CaptureApiService", "Failed to purge account data", e)
             false
+        }
+    }
+
+    override suspend fun verifyPurchase(purchaseToken: String, productId: String): com.victorkirui.core.model.VerifyPurchaseResponse {
+        return try {
+            val userId = authRepository.currentUser.value?.uid
+            api.verifyPurchase(com.victorkirui.core.model.VerifyPurchaseRequest(purchaseToken, productId, userId))
+        } catch (e: Exception) {
+            Log.e("CaptureApiService", "Failed to verify purchase", e)
+            com.victorkirui.core.model.VerifyPurchaseResponse(success = false, message = e.message)
         }
     }
 

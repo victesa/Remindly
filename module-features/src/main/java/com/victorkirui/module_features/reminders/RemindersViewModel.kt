@@ -24,7 +24,8 @@ class RemindersViewModel(
 
     val uiState: StateFlow<RemindersUiState> = authRepository.currentUser
         .flatMapLatest { user ->
-            val userId = user?.uid ?: ""
+            val firebaseUser = user ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            val userId = firebaseUser?.uid ?: ""
             if (userId.isEmpty()) {
                 flowOf(RemindersUiState.Success(emptyList(), emptyList(), LocalDate.now(), YearMonth.now(), emptyList(), emptyMap()))
             } else {
@@ -77,17 +78,9 @@ class RemindersViewModel(
 
     private fun parseDate(dateStr: String): LocalDate {
         return try {
-            if (dateStr.contains("T")) {
-                if (dateStr.endsWith("Z")) {
-                    java.time.Instant.parse(dateStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                } else {
-                    java.time.LocalDateTime.parse(dateStr).toLocalDate()
-                }
-            } else {
-                LocalDate.parse(dateStr)
-            }
+            com.victorkirui.core.util.DateUtils.parseToDateTime(dateStr).toLocalDate()
         } catch (e: Exception) {
-            LocalDate.now() // Fallback
+            LocalDate.now()
         }
     }
 

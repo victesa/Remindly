@@ -53,14 +53,8 @@ class SmallUpcomingWidget : GlanceAppWidget() {
                             .mapNotNull { item ->
                                 val dateStr = item.deadline ?: item.eventDate
                                 if (dateStr != null) {
-                                    try {
-                                        val date = if (dateStr.contains("T")) {
-                                            java.time.LocalDateTime.parse(dateStr.substringBefore("Z")).toLocalDate()
-                                        } else {
-                                            LocalDate.parse(dateStr)
-                                        }
-                                        Pair(item, date)
-                                    } catch (_: Exception) { null }
+                                    val date = com.victorkirui.core.util.DateUtils.parseToLocalDate(dateStr)
+                                    if (date != null) Pair(item, date) else null
                                 } else null
                             }
                             .filter { (_, date) -> !date.isBefore(today) }

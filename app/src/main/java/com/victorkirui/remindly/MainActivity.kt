@@ -47,6 +47,10 @@ class MainActivity : ComponentActivity() {
     private var pendingOpenCapture by mutableStateOf(false)
     private var pendingSelectedDate by mutableStateOf<String?>(null)
     private var pendingOpenPaywall by mutableStateOf(false)
+    private var pendingPromoCode by mutableStateOf<String?>(null)
+    private var pendingPromoTitle by mutableStateOf<String?>(null)
+    private var pendingPromoMessage by mutableStateOf<String?>(null)
+
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -61,8 +65,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        checkNotificationPermission()
         handleIntent(intent)
+
 
         MainScope().launch {
             settingsRepository.preferredReminderTime.collect { preferredTimeStr ->
@@ -121,8 +125,25 @@ class MainActivity : ComponentActivity() {
                         uiState = uiState,
                         onDismiss = { 
                             capturingViewModel.resetState()
+                        },
+                        onViewPlans = {
+                            capturingViewModel.resetState()
+                            pendingOpenPaywall = true
                         }
                     )
+
+                    if (pendingPromoCode != null) {
+                        com.victorkirui.module_features.subscription.CustomPromoOfferDialog(
+                            promoCode = pendingPromoCode ?: "ANDROID254",
+                            title = pendingPromoTitle ?: "Special Offer Unlocked! 🎁",
+                            message = pendingPromoMessage ?: "Claim your exclusive Remindly Pro upgrade!",
+                            onDismiss = {
+                                pendingPromoCode = null
+                                pendingPromoTitle = null
+                                pendingPromoMessage = null
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -140,6 +161,14 @@ class MainActivity : ComponentActivity() {
         }
         val extras = intent?.extras
         if (extras != null) {
+            val showPromo = extras.getBoolean("SHOW_PROMO_DIALOG", false)
+            val promoCode = extras.getString("PROMO_CODE")
+            if (showPromo) {
+                pendingPromoCode = promoCode ?: "ANDROID254"
+                pendingPromoTitle = extras.getString("PROMO_TITLE") ?: "Special Offer Unlocked! 🎁"
+                pendingPromoMessage = extras.getString("PROMO_MESSAGE") ?: "Claim your exclusive Remindly Pro upgrade!"
+            }
+
             val directItemId = extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_ITEM_ID)
                 ?: extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_ITEM_ID.name)
             if (!directItemId.isNullOrEmpty()) {
@@ -152,7 +181,9 @@ class MainActivity : ComponentActivity() {
                 pendingOpenCapture = true
             }
 
-            val openPaywall = extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_OPEN_PAYWALL, false) ||
+            val openPaywall = extras.getBoolean("OPEN_PAYWALL", false) ||
+                              extras.getBoolean("EXTRA_OPEN_PAYWALL", false) ||
+                              extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_OPEN_PAYWALL, false) ||
                               extras.getBoolean(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_OPEN_PAYWALL.name, false)
             if (openPaywall) {
                 pendingOpenPaywall = true
@@ -168,8 +199,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        checkNotificationPermission()
-        checkExactAlarmPermission()
     }
 
     override fun onStop() {
@@ -183,35 +212,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    private fun checkExactAlarmPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val alarmManager = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
-            if (!alarmManager.canScheduleExactAlarms()) {
-                try {
-                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    // Fallback to app details
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                    }
-                    startActivity(intent)
-                }
-            }
-        }
-    }
 }

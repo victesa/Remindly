@@ -33,7 +33,7 @@ val featureModule = module {
         RemindlyBackendExtractor(
             context = androidContext(),
             subscriptionRepository = get(),
-            backendBaseUrl = "https://remindly-backend-v2.victorkirui-dev.workers.dev"
+backendBaseUrl = "https://remindly-backend-v2.victorkirui-dev.workers.dev"
         ) 
     }
     factory { 
@@ -46,6 +46,7 @@ val featureModule = module {
             reminderScheduler = get(),
             calendarManager = get(),
             pdfTextExtractor = get(),
+            notificationHelper = get(),
             timestampProvider = { 
                 SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("UTC")
@@ -75,7 +76,9 @@ val featureModule = module {
             reminderScheduler = get()
         ) 
     }
-    viewModel { SignUpViewModel(get()) }
-    viewModel { SignInViewModel(get()) }
-    viewModel { OnboardingViewModel(get()) }
+    viewModel { SignUpViewModel(get(), get(), get(), get()) }
+    viewModel { SignInViewModel(get(), get(), get(), get()) }
+
+    viewModel { OnboardingViewModel(get(), get()) }
+    viewModel { com.victorkirui.module_features.nav.AppViewModel(get(), get()) }
 }

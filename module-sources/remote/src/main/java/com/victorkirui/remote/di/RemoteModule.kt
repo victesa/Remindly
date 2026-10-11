@@ -27,8 +27,8 @@ val remoteModule = module {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
-        val authRepository: AuthRepository = get()
         val subscriptionRepository: com.victorkirui.core.repository.SubscriptionRepository = get()
+
 
         OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -36,18 +36,41 @@ val remoteModule = module {
             .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(logging)
             .addInterceptor { chain ->
-                val getAuthToken = { force: Boolean -> runBlocking { authRepository.getIdToken(force) } }
-                val getTier = { runBlocking { subscriptionRepository.subscriptionTier.first() } }
+                val getAuthToken = { force: Boolean ->
+                    try {
+                        val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                        if (user != null) {
+                            val task = user.getIdToken(force)
+                            val tokenResult = com.google.android.gms.tasks.Tasks.await(task, 15, TimeUnit.SECONDS)
+                            tokenResult.token
+                        } else {
+                            Log.w("RemoteModule", "No current Firebase user found when acquiring token.")
+                            null
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RemoteModule", "Failed to acquire Firebase ID token synchronously: ${e.message}", e)
+                        null
+                    }
+                }
+
+                val getTier = {
+                    try {
+                        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                            subscriptionRepository.subscriptionTier.first()
+                        }
+                    } catch (e: Exception) {
+                        SubscriptionTier.FREE
+                    }
+                }
                 
                 var token = getAuthToken(false)
                 val tier = getTier()
+
                 
                 val buildRequest = { authToken: String? ->
                     val builder = chain.request().newBuilder()
                         .addHeader("X-Tunnel-Skip-Anti-Phishing-Page", "true")
                         .addHeader("X-User-Tier", tier.name.lowercase())
-                        .addHeader("CF-Access-Client-Id", com.victorkirui.core.BuildConfig.CF_ACCESS_CLIENT_ID)
-                        .addHeader("CF-Access-Client-Secret", com.victorkirui.core.BuildConfig.CF_ACCESS_CLIENT_SECRET)
                     
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         builder.addHeader("X-Client-Date", java.time.Instant.now().toString())
@@ -75,7 +98,30 @@ val remoteModule = module {
                 }
 
                 val responseBody = response.body
+                val isSyncWithoutSince = initialRequest.url.toString().contains("v1/items/sync") &&
+                        !initialRequest.url.toString().contains("since=")
+
+                if (isSyncWithoutSince && responseBody != null) {
+                    try {
+                        val source = responseBody.source()
+                        source.request(Long.MAX_VALUE)
+                        val rawBody = source.buffer.clone().readUtf8()
+                        Log.i("BACKEND_TEST", """
+                            =================== BACKEND TEST: GET /v1/items/sync ===================
+                            URL: ${initialRequest.url}
+                            Authorization: Bearer [REDACTED]
+                            HTTP Status: ${response.code}
+                            Response JSON:
+                            $rawBody
+                            ========================================================================
+                        """.trimIndent())
+                    } catch (e: Exception) {
+                        Log.w("BACKEND_TEST", "Failed to format BACKEND_TEST log: ${e.message}")
+                    }
+                }
+
                 if (response.code !in 200..299) {
+
                     if (responseBody != null) {
                         try {
                             val source = responseBody.source()
@@ -162,18 +208,6 @@ val remoteModule = module {
     }
 
     single { get<Retrofit>().create(CaptureApi::class.java) }
-    single<CaptureApiService> { CaptureApiServiceImpl(get(), androidContext()) }
-    single<com.victorkirui.core.data.DataClearer> {
-        object : com.victorkirui.core.data.DataClearer {
-            override suspend fun clearUserData(userId: String) {
-                try {
-                    val api: CaptureApiService = get()
-                    val success = api.purgeAccount()
-                    Log.d("RemoteModule", "Purged remote account data for $userId: success=$success")
-                } catch (e: Exception) {
-                    Log.w("RemoteModule", "Failed to purge remote account data for $userId: ${e.message}")
-                }
-            }
-        }
-    }
+    single<CaptureApiService> { CaptureApiServiceImpl(get(), androidContext(), get()) }
+    single<com.victorkirui.core.billing.PurchaseVerifier> { get<CaptureApiService>() }
 }

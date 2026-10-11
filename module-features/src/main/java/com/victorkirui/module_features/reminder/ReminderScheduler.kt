@@ -96,55 +96,7 @@ class ReminderScheduler(
             return emptyList()
         }
 
-        val preferredTimeStr = settingsRepository.preferredReminderTime.first()
-        val preferredTime = try {
-            LocalTime.parse(preferredTimeStr)
-        } catch (e: Exception) {
-            LocalTime.of(8, 0)
-        }
-
-        val daysUntil = ChronoUnit.DAYS.between(today, targetDate)
         val reminders = mutableListOf<Reminder>()
-
-        // Schedule based on interval logic
-        when {
-            daysUntil <= 7 -> {
-                for (i in 1..daysUntil) {
-                    reminders.add(createReminder(item.id, today.plusDays(i), preferredTime, "DAILY"))
-                }
-            }
-            daysUntil <= 14 -> {
-                var current = today.plusDays(2)
-                while (current.isBefore(targetDate)) {
-                    reminders.add(createReminder(item.id, current, preferredTime, "INTERVAL"))
-                    current = current.plusDays(2)
-                }
-                val dayBefore = targetDate.minusDays(1)
-                if (reminders.none { it.reminderDateTime.startsWith(dayBefore.toString()) }) {
-                    reminders.add(createReminder(item.id, dayBefore, preferredTime, "INTERVAL"))
-                }
-            }
-            daysUntil <= 30 -> {
-                var current = today.plusDays(7)
-                while (current.isBefore(targetDate)) {
-                    reminders.add(createReminder(item.id, current, preferredTime, "WEEKLY"))
-                    current = current.plusWeeks(1)
-                }
-                reminders.add(createReminder(item.id, targetDate.minusDays(3), preferredTime, "INTERVAL"))
-                reminders.add(createReminder(item.id, targetDate.minusDays(1), preferredTime, "INTERVAL"))
-            }
-            else -> {
-                var current = today.plusWeeks(2)
-                while (current.isBefore(targetDate.minusWeeks(2))) {
-                    reminders.add(createReminder(item.id, current, preferredTime, "BI_WEEKLY"))
-                    current = current.plusWeeks(2)
-                }
-                reminders.add(createReminder(item.id, targetDate.minusDays(14), preferredTime, "INTERVAL"))
-                reminders.add(createReminder(item.id, targetDate.minusDays(7), preferredTime, "INTERVAL"))
-                reminders.add(createReminder(item.id, targetDate.minusDays(3), preferredTime, "INTERVAL"))
-                reminders.add(createReminder(item.id, targetDate.minusDays(1), preferredTime, "INTERVAL"))
-            }
-        }
 
         // --- TEST MODE ---
         if (item.id.startsWith("test_item")) {
@@ -213,14 +165,7 @@ class ReminderScheduler(
     }
 
     private fun scheduleAlarm(reminder: Reminder) {
-        // Check for exact alarm permission on Android 12+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            if (!alarmManager.canScheduleExactAlarms()) {
-                android.util.Log.e("ReminderScheduler", "Cannot schedule exact alarms: permission not granted")
-                return
-            }
-        }
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra("item_id", reminder.itemId)
@@ -236,7 +181,7 @@ class ReminderScheduler(
         )
 
         val triggerAt = try {
-            LocalDateTime.parse(reminder.reminderDateTime)
+            com.victorkirui.core.util.DateUtils.parseToDateTime(reminder.reminderDateTime)
                 .atZone(ZoneId.systemDefault())
                 .toInstant()
                 .toEpochMilli()
@@ -248,14 +193,34 @@ class ReminderScheduler(
         val now = System.currentTimeMillis()
         if (triggerAt > now) {
             try {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerAt,
-                    pendingIntent
-                )
-                android.util.Log.d("ReminderScheduler", "Scheduled alarm for ${reminder.itemId} at ${reminder.reminderDateTime} (ID: ${reminder.id}) in ${(triggerAt - now) / 1000}s")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pendingIntent
+                    )
+                    android.util.Log.d("ReminderScheduler", "Scheduled exact alarm for ${reminder.itemId} at ${reminder.reminderDateTime} (ID: ${reminder.id}) in ${(triggerAt - now) / 1000}s")
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pendingIntent
+                    )
+                    android.util.Log.d("ReminderScheduler", "Scheduled fallback alarm for ${reminder.itemId} at ${reminder.reminderDateTime}")
+                }
             } catch (e: SecurityException) {
-                android.util.Log.e("ReminderScheduler", "SecurityException scheduling exact alarm", e)
+                android.util.Log.w("ReminderScheduler", "SecurityException scheduling exact alarm, using fallback: ${e.message}")
+                try {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pendingIntent
+                    )
+                } catch (e2: Exception) {
+                    android.util.Log.e("ReminderScheduler", "Failed fallback alarm scheduling: ${e2.message}", e2)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ReminderScheduler", "Error scheduling alarm: ${e.message}", e)
             }
         } else {
             android.util.Log.w("ReminderScheduler", "Skipping past alarm for ${reminder.itemId} at ${reminder.reminderDateTime}")

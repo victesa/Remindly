@@ -25,7 +25,8 @@ class InboxViewModel(
 
     val uiState: StateFlow<InboxUiState> = authRepository.currentUser
         .flatMapLatest { user ->
-            val userId = user?.uid ?: ""
+            val firebaseUser = user ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            val userId = firebaseUser?.uid ?: ""
             if (userId.isEmpty()) {
                 flowOf(InboxUiState.Success(emptyList(), emptyList(), null, ""))
             } else {
@@ -35,6 +36,7 @@ class InboxViewModel(
                     _selectedCategoryId,
                     _searchQuery
                 ) { allItems, allCategoryNames, selectedId, query ->
+                    android.util.Log.d("InboxViewModel", "combine triggered for userId='$userId': totalInDb=${allItems.size}, categoriesInDb=$allCategoryNames")
                     val categories = mutableListOf<InboxCategory>()
                     
                     // 1. Filter items by search query if present
@@ -111,12 +113,31 @@ class InboxViewModel(
                         }
                     }
 
+                    // 4. Completed / History items (Grace Period Archive)
+                    val historyItems = allItems.filter { it.status == "DONE" }
+                    val filteredHistoryItems = filteredItems.filter { it.status == "DONE" }
+                    if (historyItems.isNotEmpty()) {
+                        val matches = query.isBlank() || "History".contains(query, ignoreCase = true) || "Completed".contains(query, ignoreCase = true) || filteredHistoryItems.isNotEmpty()
+                        if (matches) {
+                            categories.add(
+                                InboxCategory(
+                                    id = "HISTORY",
+                                    latestItemTitle = historyItems.first().title,
+                                    count = historyItems.size,
+                                    hasPendingSync = false,
+                                    iconType = "history"
+                                )
+                            )
+                        }
+                    }
+
                     // UI filtering logic
                     val finalSelectedId = selectedId ?: categories.firstOrNull()?.id
                     
                     val displayItems = when (finalSelectedId) {
                         "PENDING_SYNC" -> filteredPendingItems
                         "UNCATEGORIZED" -> filteredActiveItems.filter { it.category.isNullOrBlank() }
+                        "HISTORY" -> filteredHistoryItems
                         null -> emptyList()
                         else -> filteredActiveItems.filter { it.category == finalSelectedId }
                     }
@@ -140,6 +161,7 @@ class InboxViewModel(
         "travel", "flights", "trip" -> "flight"
         "events", "meetups" -> "event"
         "bills", "receipts", "finance" -> "receipt"
+        "history" -> "history"
         else -> "category"
     }
 
@@ -148,19 +170,52 @@ class InboxViewModel(
     }
 
     fun deleteItem(itemId: String) {
+        deleteItems(setOf(itemId))
+    }
+
+    fun deleteItems(itemIds: Set<String>) {
         val userId = authRepository.currentUser.value?.uid ?: return
         viewModelScope.launch {
             try {
                 val tier = subscriptionRepository.subscriptionTier.first()
-                if (tier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM) {
-                    localRepository.addPendingDeletion(com.victorkirui.local.entity.PendingDeletion(itemId, userId))
+                val isPremium = tier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
+
+                itemIds.forEach { itemId ->
+                    if (isPremium) {
+                        localRepository.addPendingDeletion(com.victorkirui.local.entity.PendingDeletion(itemId, userId))
+                    }
+                    localRepository.deleteItem(userId, itemId)
+                }
+
+                if (isPremium) {
                     com.victorkirui.module_features.capturing.SyncWorker.schedule(
                         org.koin.core.context.GlobalContext.get().get()
                     )
                 }
-                localRepository.deleteItem(userId, itemId)
             } catch (e: Exception) {
-                android.util.Log.e("InboxViewModel", "Failed to delete item: ${e.message}", e)
+                android.util.Log.e("InboxViewModel", "Failed to delete items: ${e.message}", e)
+            }
+        }
+    }
+
+    fun markItemsAsDone(itemIds: Set<String>) {
+        val userId = authRepository.currentUser.value?.uid ?: return
+        viewModelScope.launch {
+            try {
+                val tier = subscriptionRepository.subscriptionTier.first()
+                val isPremium = tier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
+
+                itemIds.forEach { itemId ->
+                    val item = localRepository.getItem(itemId) ?: return@forEach
+                    localRepository.updateItem(item.copy(status = "DONE"))
+                    if (isPremium) {
+                        try {
+                            captureApiService.updateItem(itemId, mapOf("state" to "DONE"))
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("InboxViewModel", "Failed to mark items as done: ${e.message}", e)
             }
         }
     }

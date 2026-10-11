@@ -66,12 +66,8 @@ class MediumCalendarWidget : GlanceAppWidget() {
                                     val deadline = item.deadline
                                     if (deadline != null) {
                                         try {
-                                            val itemLocalDate = if (deadline.contains("T")) {
-                                                java.time.LocalDateTime.parse(deadline.substringBefore("Z")).toLocalDate()
-                                            } else {
-                                                LocalDate.parse(deadline)
-                                            }
-                                            ChronoUnit.DAYS.between(today, itemLocalDate) <= 1
+                                            val itemLocalDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(deadline)
+                                            itemLocalDate != null && ChronoUnit.DAYS.between(today, itemLocalDate) <= 1
                                         } catch (_: Exception) { false }
                                     } else false
                                 }

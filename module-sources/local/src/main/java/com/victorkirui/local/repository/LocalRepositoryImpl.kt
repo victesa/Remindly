@@ -1,6 +1,5 @@
 package com.victorkirui.local.repository
 
-import com.victorkirui.core.util.DateUtils
 import com.victorkirui.local.dao.ItemDao
 import com.victorkirui.local.dao.PendingSyncDao
 import com.victorkirui.local.dao.ReminderDao
@@ -16,7 +15,8 @@ class LocalRepositoryImpl(
     private val itemDao: ItemDao,
     private val pendingSyncDao: PendingSyncDao,
     private val pendingDeletionDao: com.victorkirui.local.dao.PendingDeletionDao,
-    private val reminderDao: ReminderDao
+    private val reminderDao: ReminderDao,
+    private val calendarManager: com.victorkirui.core.calendar.CalendarManager? = null
 ) : LocalRepository {
     
     override suspend fun saveItem(item: Item): Long {
@@ -52,13 +52,17 @@ class LocalRepositoryImpl(
     }
 
     override suspend fun findDuplicate(userId: String, url: String?, text: String?): Item? {
-        if (url == null && text == null) return null
-        return itemDao.findDuplicate(userId, url, text)
+        val cleanUrl = url?.trim()?.takeIf { it.isNotBlank() }
+        val cleanText = text?.trim()?.takeIf { it.isNotBlank() && it.length >= 15 }
+        if (cleanUrl == null && cleanText == null) return null
+        return itemDao.findDuplicate(userId, cleanUrl, cleanText)
     }
 
     override suspend fun findDuplicateEx(userId: String, url: String?, text: String?, title: String?): Item? {
-        if (url == null && text == null && title == null) return null
-        return itemDao.findDuplicateEx(userId, url, text, title)
+        val cleanUrl = url?.trim()?.takeIf { it.isNotBlank() }
+        val cleanText = text?.trim()?.takeIf { it.isNotBlank() && it.length >= 15 }
+        if (cleanUrl == null && cleanText == null) return null
+        return itemDao.findDuplicateEx(userId, cleanUrl, cleanText, null)
     }
 
     override suspend fun addPendingSync(sync: PendingSync) {
@@ -105,7 +109,21 @@ class LocalRepositoryImpl(
         reminderDao.updateReminder(reminder)
     }
 
+    private fun cleanupCalendarEvent(item: Item?) {
+        val uri = item?.metadata?.get("calendar_event_uri")
+        if (!uri.isNullOrBlank()) {
+            calendarManager?.deleteEvent(uri)
+        }
+    }
+
     override suspend fun deleteItem(userId: String, id: String) {
+        try {
+            val item = itemDao.getItemById(id)
+            cleanupCalendarEvent(item)
+        } catch (e: Exception) {
+            android.util.Log.e("LocalRepository", "Error cleaning calendar event for item $id", e)
+        }
+
         database.withTransaction {
             reminderDao.deleteRemindersForItem(id)
             pendingSyncDao.deleteByItemId(id)
@@ -114,29 +132,46 @@ class LocalRepositoryImpl(
     }
 
     override suspend fun deleteItemsByCategory(userId: String, category: String) {
+        try {
+            val items = itemDao.getItemsByCategorySync(userId, category)
+            items.forEach { cleanupCalendarEvent(it) }
+        } catch (_: Exception) {}
+
         itemDao.deleteByCategory(userId, category)
     }
 
     override suspend fun deleteUncategorizedItems(userId: String) {
+        try {
+            val items = itemDao.getUncategorizedItemsSync(userId)
+            items.forEach { cleanupCalendarEvent(it) }
+        } catch (_: Exception) {}
+
         itemDao.deleteUncategorized(userId)
     }
 
     override suspend fun deletePendingSyncItems(userId: String) {
+        try {
+            val items = itemDao.getPendingSyncItemsSync(userId)
+            items.forEach { cleanupCalendarEvent(it) }
+        } catch (_: Exception) {}
+
         itemDao.deletePendingSync(userId)
     }
 
     override suspend fun deleteExpiredItems(userId: String) {
-        val now = LocalDateTime.now()
+        val now = java.time.LocalDateTime.now()
+        val retentionCutoff = now.minusDays(14) // Option B: 14-day grace period
         val allItems = itemDao.getAllItems(userId).first()
         
         allItems.forEach { item ->
             val deadlineStr = item.deadline ?: item.eventDate
             if (deadlineStr != null) {
                 try {
-                    val deadline = DateUtils.parseToDateTime(deadlineStr)
+                    val deadline = com.victorkirui.core.util.DateUtils.parseToDateTime(deadlineStr)
 
-                    if (deadline.isBefore(now)) {
-                        android.util.Log.d("LocalRepository", "Deleting expired item: ${item.id} (Deadline: $deadlineStr)")
+                    // Purge items whose deadline or event date passed more than 14 days ago
+                    if (deadline.isBefore(retentionCutoff)) {
+                        android.util.Log.d("LocalRepository", "Purging expired item older than 14 days: ${item.id} (Deadline: $deadlineStr)")
                         deleteItem(userId, item.id)
                     }
                 } catch (_: Exception) { }
@@ -148,8 +183,17 @@ class LocalRepositoryImpl(
         itemDao.deleteAllForUser(userId)
     }
 
+    override suspend fun getAllItemsSyncForUser(userId: String): List<Item> {
+        return itemDao.getAllItemsSyncForUser(userId)
+    }
+
     override suspend fun clearUserData(userId: String) {
-        deleteAllItemsForUser(userId)
+        try {
+            database.clearAllTables()
+        } catch (e: Exception) {
+            android.util.Log.e("LocalRepository", "Failed clearAllTables in Room: ${e.message}", e)
+            deleteAllItemsForUser(userId)
+        }
     }
 
     override suspend fun <R> withTransaction(block: suspend () -> R): R {

@@ -42,23 +42,55 @@ interface ItemDao {
     @Query("SELECT * FROM Item WHERE userId = :userId AND (title LIKE '%' || :query || '%' OR summary LIKE '%' || :query || '%' OR category LIKE '%' || :query || '%') ORDER BY createdAt DESC")
     fun searchItems(userId: String, query: String): Flow<List<Item>>
 
-    @Query("SELECT * FROM Item WHERE userId = :userId AND ((:url IS NOT NULL AND sourceUrl = :url) OR (:text IS NOT NULL AND extractedText = :text)) LIMIT 1")
+    @Query("""
+        SELECT * FROM Item 
+        WHERE userId = :userId 
+        AND (
+            (:url IS NOT NULL AND :url != '' AND sourceUrl = :url) 
+            OR 
+            (:text IS NOT NULL AND :text != '' AND LENGTH(:text) >= 15 AND extractedText = :text)
+        ) 
+        LIMIT 1
+    """)
     suspend fun findDuplicate(userId: String, url: String?, text: String?): Item?
 
-    @Query("SELECT * FROM Item WHERE userId = :userId AND ((:url IS NOT NULL AND sourceUrl = :url) OR (:text IS NOT NULL AND extractedText = :text) OR (:title IS NOT NULL AND title = :title)) LIMIT 1")
+    @Query("""
+        SELECT * FROM Item 
+        WHERE userId = :userId 
+        AND (
+            (:url IS NOT NULL AND :url != '' AND sourceUrl = :url) 
+            OR 
+            (:text IS NOT NULL AND :text != '' AND LENGTH(:text) >= 15 AND extractedText = :text)
+            OR
+            (:title IS NOT NULL AND :title != '' AND :title != 'Analysing...' AND :title != 'Untitled' AND :title != 'Saved Offline' AND title = :title)
+        ) 
+        LIMIT 1
+    """)
     suspend fun findDuplicateEx(userId: String, url: String?, text: String?, title: String?): Item?
 
     @Query("DELETE FROM Item WHERE userId = :userId AND id = :id")
     suspend fun deleteById(userId: String, id: String)
 
+    @Query("SELECT * FROM Item WHERE userId = :userId AND category = :category")
+    suspend fun getItemsByCategorySync(userId: String, category: String): List<Item>
+
     @Query("DELETE FROM Item WHERE userId = :userId AND category = :category")
     suspend fun deleteByCategory(userId: String, category: String)
+
+    @Query("SELECT * FROM Item WHERE userId = :userId AND (category IS NULL OR category = '')")
+    suspend fun getUncategorizedItemsSync(userId: String): List<Item>
 
     @Query("DELETE FROM Item WHERE userId = :userId AND (category IS NULL OR category = '')")
     suspend fun deleteUncategorized(userId: String)
 
+    @Query("SELECT * FROM Item WHERE userId = :userId AND status = 'PENDING'")
+    suspend fun getPendingSyncItemsSync(userId: String): List<Item>
+
     @Query("DELETE FROM Item WHERE userId = :userId AND status = 'PENDING'")
     suspend fun deletePendingSync(userId: String)
+
+    @Query("SELECT * FROM Item WHERE userId = :userId")
+    suspend fun getAllItemsSyncForUser(userId: String): List<Item>
 
     @Query("DELETE FROM Item WHERE userId = :userId")
     suspend fun deleteAllForUser(userId: String)

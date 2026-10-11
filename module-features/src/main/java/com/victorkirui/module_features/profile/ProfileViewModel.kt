@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import com.victorkirui.module_features.reminder.BriefingWorker
 import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.time.LocalTime
 
 class ProfileViewModel(
@@ -18,6 +19,25 @@ class ProfileViewModel(
     private val authRepository: AuthRepository,
     private val reminderScheduler: com.victorkirui.module_features.reminder.ReminderScheduler
 ) : ViewModel(), KoinComponent {
+
+    private val captureApiService: com.victorkirui.remote.CaptureApiService by inject()
+
+    init {
+        viewModelScope.launch {
+            try {
+                val profile = captureApiService.getMe()
+                if (profile.success) {
+                    val targetTier = if (profile.isProUser) SubscriptionTier.PREMIUM else SubscriptionTier.FREE
+                    subscriptionRepository.updateTier(targetTier)
+                    if (profile.quotaLimit >= 0 && profile.quotaRemaining >= 0) {
+                        subscriptionRepository.updateQuota(profile.quotaLimit, profile.quotaRemaining)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ProfileViewModel", "Failed to sync profile quota: ${e.message}")
+            }
+        }
+    }
 
     val uiState: StateFlow<ProfileUiState> = combine(
         settingsRepository.preferredReminderTime,
@@ -40,8 +60,15 @@ class ProfileViewModel(
         val remaining = args[7] as Int
         val calendarSync = args[8] as Boolean
 
+        val rawName = user?.displayName
+        val displayName = when {
+            !rawName.isNullOrBlank() -> rawName
+            !user?.email.isNullOrBlank() -> user.email!!.substringBefore("@").replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
+            else -> "User"
+        }
+
         ProfileUiState(
-            userName = user?.displayName ?: "User",
+            userName = displayName,
             userEmail = user?.email ?: "",
             preferredReminderTime = time,
             isMorningBriefingEnabled = morningBriefing,
@@ -98,12 +125,6 @@ class ProfileViewModel(
         viewModelScope.launch {
             val result = authRepository.deleteAccount()
             _deletionResult.emit(result)
-        }
-    }
-
-    fun setSubscriptionTier(tier: SubscriptionTier) {
-        viewModelScope.launch {
-            subscriptionRepository.setSubscriptionTier(tier)
         }
     }
 

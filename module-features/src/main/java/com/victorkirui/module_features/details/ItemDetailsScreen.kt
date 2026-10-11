@@ -133,7 +133,9 @@ fun ItemDetailsScreen(
             }
         },
         onViewInCalendar = {
-            lastSyncedEventUri?.let { uriStr ->
+            val state = uiState as? ItemDetailsUiState.Success
+            val uriStr = state?.item?.metadata?.get("calendar_event_uri") ?: lastSyncedEventUri
+            if (uriStr != null) {
                 try {
                     val intent = Intent(Intent.ACTION_VIEW).apply {
                         data = android.net.Uri.parse(uriStr)
@@ -142,10 +144,17 @@ fun ItemDetailsScreen(
                 } catch (e: Exception) {
                     android.util.Log.e("ItemDetails", "Failed to open calendar event: ${e.message}")
                 }
+            } else {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = android.net.Uri.parse("content://com.android.calendar/time")
+                    }
+                    context.startActivity(intent)
+                } catch (_: Exception) {}
             }
         },
         windowWidthSizeClass = windowSizeClass.widthSizeClass,
-        hasSynced = lastSyncedEventUri != null
+        hasSynced = (uiState as? ItemDetailsUiState.Success)?.isSynced == true || lastSyncedEventUri != null
     )
 }
 
@@ -170,6 +179,7 @@ fun ItemDetailsScreenContent(
     var showDoneSuccess by rememberSaveable { mutableStateOf(false) }
     var showUndoConfirm by rememberSaveable { mutableStateOf(false) }
     var showSubscriptionPlans by rememberSaveable { mutableStateOf(false) }
+    var showRawDebugSheet by rememberSaveable { mutableStateOf(false) }
 
     if (showSubscriptionPlans) {
         com.victorkirui.module_features.subscription.SubscriptionPaywallSheet(
@@ -180,6 +190,13 @@ fun ItemDetailsScreenContent(
 
     val item = (uiState as? ItemDetailsUiState.Success)?.item
     val isDone = item?.status == "DONE"
+
+    if (showRawDebugSheet && item != null) {
+        RawBackendDataSheet(
+            item = item,
+            onDismiss = { showRawDebugSheet = false }
+        )
+    }
 
     if (showDeleteConfirm) {
         AlertDialog(
@@ -311,14 +328,19 @@ fun ItemDetailsScreenContent(
                             ) {
                                 val state = uiState as? ItemDetailsUiState.Success
                                 if (state != null && state.tier == SubscriptionTier.PREMIUM && (state.item.eventDate != null || state.item.deadline != null)) {
+                                    val hasSyncedMenu = state.isSynced || state.item.metadata?.get("google_calendar_synced") == "true" || state.item.metadata?.get("calendar_event_uri") != null
                                     DropdownMenuItem(
-                                        text = { Text("Sync to Calendar") },
+                                        text = { Text(if (hasSyncedMenu) "Synced to Calendar" else "Sync to Calendar") },
                                         onClick = {
-                                            onSyncToCalendar()
+                                            if (hasSyncedMenu) onViewInCalendar() else onSyncToCalendar()
                                             showMenu = false
                                         },
                                         leadingIcon = {
-                                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF2D6A4F))
+                                            Icon(
+                                                imageVector = if (hasSyncedMenu) Icons.Default.CheckCircle else Icons.Default.CalendarToday,
+                                                contentDescription = null,
+                                                tint = Color(0xFF2D6A4F)
+                                            )
                                         }
                                     )
                                 }
@@ -399,7 +421,8 @@ fun ItemDetailsScreenContent(
                             onViewInCalendar = onViewInCalendar,
                             tier = state.tier,
                             hasSynced = hasSynced,
-                            onUpgrade = { showSubscriptionPlans = true }
+                            onUpgrade = { showSubscriptionPlans = true },
+                            onDeadlineClick = { showRawDebugSheet = true }
                         )
                     } else {
                         SinglePaneLayout(
@@ -411,7 +434,8 @@ fun ItemDetailsScreenContent(
                             onSyncToCalendar = onSyncToCalendar,
                             onViewInCalendar = onViewInCalendar,
                             hasSynced = hasSynced,
-                            onUpgrade = { showSubscriptionPlans = true }
+                            onUpgrade = { showSubscriptionPlans = true },
+                            onDeadlineClick = { showRawDebugSheet = true }
                         )
                     }
                 }
@@ -459,7 +483,8 @@ fun SinglePaneLayout(
     onSyncToCalendar: () -> Unit = {},
     onViewInCalendar: () -> Unit = {},
     hasSynced: Boolean = false,
-    onUpgrade: () -> Unit = {}
+    onUpgrade: () -> Unit = {},
+    onDeadlineClick: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -475,7 +500,8 @@ fun SinglePaneLayout(
             onSyncToCalendar = onSyncToCalendar,
             onViewInCalendar = onViewInCalendar,
             hasSynced = hasSynced,
-            onUpgrade = onUpgrade
+            onUpgrade = onUpgrade,
+            onDeadlineClick = onDeadlineClick
         )
     }
 }
@@ -493,7 +519,8 @@ fun TwoPaneLayout(
     onViewInCalendar: () -> Unit = {},
     tier: SubscriptionTier = SubscriptionTier.FREE,
     hasSynced: Boolean = false,
-    onUpgrade: () -> Unit = {}
+    onUpgrade: () -> Unit = {},
+    onDeadlineClick: () -> Unit = {}
 ) {
     var showMenu by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
@@ -626,14 +653,19 @@ fun TwoPaneLayout(
                         modifier = Modifier.background(Color.White)
                     ) {
                         if (tier == SubscriptionTier.PREMIUM && (item.eventDate != null || item.deadline != null)) {
+                            val hasSyncedMenu = hasSynced || item.metadata?.get("google_calendar_synced") == "true" || item.metadata?.get("calendar_event_uri") != null
                             DropdownMenuItem(
-                                text = { Text("Sync to Calendar") },
+                                text = { Text(if (hasSyncedMenu) "Synced to Calendar" else "Sync to Calendar") },
                                 onClick = {
-                                    onSyncToCalendar()
+                                    if (hasSyncedMenu) onViewInCalendar() else onSyncToCalendar()
                                     showMenu = false
                                 },
                                 leadingIcon = {
-                                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF2D6A4F))
+                                    Icon(
+                                        imageVector = if (hasSyncedMenu) Icons.Default.CheckCircle else Icons.Default.CalendarToday,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2D6A4F)
+                                    )
                                 }
                             )
                         }
@@ -758,20 +790,31 @@ fun TwoPaneLayout(
             )
             
             if (tier == SubscriptionTier.PREMIUM && (item.eventDate != null || item.deadline != null)) {
+                val hasSyncedLarge = hasSynced || item.metadata?.get("google_calendar_synced") == "true" || item.metadata?.get("calendar_event_uri") != null
                 Button(
-                    onClick = onSyncToCalendar,
+                    onClick = if (hasSyncedLarge) onViewInCalendar else onSyncToCalendar,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasSyncedLarge) Color(0xFFEAF2EE) else Color(0xFF2D6A4F)
+                    )
                 ) {
-                    Icon(Icons.Default.CalendarToday, null)
+                    Icon(
+                        imageVector = if (hasSyncedLarge) Icons.Default.CheckCircle else Icons.Default.CalendarToday,
+                        contentDescription = null,
+                        tint = if (hasSyncedLarge) Color(0xFF2D6A4F) else Color.White
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("Sync to Google Calendar", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (hasSyncedLarge) "Synced to Calendar" else "Sync to Calendar",
+                        fontWeight = FontWeight.Bold,
+                        color = if (hasSyncedLarge) Color(0xFF2D6A4F) else Color.White
+                    )
                 }
             }
 
             ChecklistSection(item.checklist)
-            MetadataSection(item)
+            MetadataSection(item, onDeadlineClick = onDeadlineClick)
             RemindersSection(reminders)
             RelatedSection()
         }
@@ -966,29 +1009,29 @@ fun ChecklistSection(checklist: List<String>?) {
 }
 
 @Composable
-fun MetadataSection(item: Item) {
+fun MetadataSection(item: Item, onDeadlineClick: () -> Unit = {}) {
     RemindlyCard {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            if (item.deadline != null) {
-                MetadataRow(
-                    icon = Icons.Default.CalendarToday,
-                    label = "Deadline",
-                    value = DateUtils.getReadableDeadline(item.deadline),
-                    isUrgent = true
-                )
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-            }
+            MetadataRow(
+                icon = Icons.Default.CalendarToday,
+                label = "Deadline",
+                value = if (item.deadline != null) DateUtils.getReadableDeadline(item.deadline) else "None",
+                isUrgent = item.deadline != null,
+                onClick = onDeadlineClick
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
             
             if (item.eventDate != null) {
                 MetadataRow(
                     icon = Icons.Default.Event,
                     label = "Event Date",
                     value = DateUtils.getReadableDeadline(item.eventDate),
-                    isBold = true
+                    isBold = true,
+                    onClick = onDeadlineClick
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -1201,7 +1244,8 @@ fun ItemDetailsContent(
     onSyncToCalendar: () -> Unit = {},
     onViewInCalendar: () -> Unit = {},
     hasSynced: Boolean = false,
-    onUpgrade: () -> Unit = {}
+    onUpgrade: () -> Unit = {},
+    onDeadlineClick: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -1219,7 +1263,7 @@ fun ItemDetailsContent(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (hasSynced) Color(0xFFEAF2EE) else Color(0xFF4285F4)
+                    containerColor = if (hasSynced) Color(0xFFEAF2EE) else Color(0xFF2D6A4F)
                 )
             ) {
                 Icon(
@@ -1229,7 +1273,7 @@ fun ItemDetailsContent(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (hasSynced) "View in Google Calendar" else "Sync to Google Calendar", 
+                    text = if (hasSynced) "Synced to Calendar" else "Sync to Calendar", 
                     fontWeight = FontWeight.Bold,
                     color = if (hasSynced) Color(0xFF2D6A4F) else Color.White
                 )
@@ -1237,7 +1281,7 @@ fun ItemDetailsContent(
         }
 
         ChecklistSection(item.checklist)
-        MetadataSection(item)
+        MetadataSection(item, onDeadlineClick = onDeadlineClick)
         
         // Contact Section in single pane
         if (item.organization != null || item.sourceUrl != null) {
@@ -1394,11 +1438,13 @@ fun MetadataRow(
     isBadge: Boolean = false,
     isBold: Boolean = false,
     isSource: Boolean = false,
-    iconRes: Int? = null
+    iconRes: Int? = null,
+    onClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(16.dp, 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1549,5 +1595,193 @@ fun ItemDetailsLargeScreenPreview() {
             onRetry = {},
             windowWidthSizeClass = WindowWidthSizeClass.Expanded
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RawBackendDataSheet(
+    item: Item,
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    
+    val rawJson = remember(item) {
+        val map = mutableMapOf<String, Any?>(
+            "id" to item.id,
+            "userId" to item.userId,
+            "title" to item.title,
+            "summary" to item.summary,
+            "category" to item.category,
+            "deadline" to item.deadline,
+            "eventDate" to item.eventDate,
+            "organization" to item.organization,
+            "source" to item.source,
+            "sourceUrl" to item.sourceUrl,
+            "status" to item.status,
+            "createdAt" to item.createdAt,
+            "extractedText" to item.extractedText,
+            "checklist" to item.checklist,
+            "metadata" to item.metadata
+        )
+        try {
+            com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(map)
+        } catch (e: Exception) {
+            map.toString()
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 32.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.BugReport,
+                        contentDescription = "Debug",
+                        tint = Color(0xFFC0392B),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Raw Backend Payload",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                }
+            }
+
+            Text(
+                "Unprocessed raw payload received from backend/database endpoints.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            // Section 1: Raw Date Strings
+            DebugSectionHeader("RAW DATE & TIME FIELDS")
+            DebugRow("Raw deadline:", item.deadline ?: "(null)")
+            DebugRow("Raw eventDate:", item.eventDate ?: "(null)")
+            DebugRow("Raw createdAt:", item.createdAt)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Section 2: Raw Metadata Map
+            DebugSectionHeader("METADATA MAP")
+            val meta = item.metadata
+            if (!meta.isNullOrEmpty()) {
+                meta.forEach { (key, value) ->
+                    DebugRow("$key:", value.toString())
+                }
+            } else {
+                Text("(No metadata present)", fontSize = 12.sp, color = Color.Gray)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Section 3: Item Fields
+            DebugSectionHeader("ITEM DETAILS")
+            DebugRow("Raw title:", item.title)
+            DebugRow("Raw summary:", item.summary ?: "(null)")
+            DebugRow("Raw category:", item.category ?: "(null)")
+            DebugRow("Raw organization:", item.organization ?: "(null)")
+            DebugRow("Raw source:", item.source ?: "(null)")
+            DebugRow("Raw sourceUrl:", item.sourceUrl ?: "(null)")
+            DebugRow("Raw checklist:", item.checklist?.toString() ?: "(null)")
+            DebugRow("Raw extractedText:", item.extractedText ?: "(null)")
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Section 4: Identifiers
+            DebugSectionHeader("SYSTEM IDENTIFIERS")
+            DebugRow("id:", item.id)
+            DebugRow("userId:", item.userId)
+            DebugRow("status:", item.status)
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clip = android.content.ClipData.newPlainText("Raw Payload JSON", rawJson)
+                        clipboard.setPrimaryClip(clip)
+                        android.widget.Toast.makeText(context, "Copied Raw JSON to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Copy JSON", fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6A4F)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Close", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugSectionHeader(title: String) {
+    Text(
+        title,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color(0xFF2D6A4F),
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun DebugRow(label: String, value: String) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.Gray
+        )
+        Surface(
+            color = Color(0xFFF4F6F4),
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+        ) {
+            Text(
+                value,
+                fontSize = 12.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = Color.Black,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+            )
+        }
     }
 }

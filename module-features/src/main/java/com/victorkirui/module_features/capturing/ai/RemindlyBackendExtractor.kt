@@ -5,7 +5,9 @@ import android.net.Uri
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import com.victorkirui.core.repository.SubscriptionRepository
+
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -33,6 +35,7 @@ class RemindlyBackendExtractor(
     private val backendBaseUrl: String = "https://remindly-backend-v2.victorkirui-dev.workers.dev"
 ) : AiExtractor {
 
+
     private val gson = Gson()
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -59,8 +62,9 @@ class RemindlyBackendExtractor(
 
             for (attempt in 0..MAX_RETRIES) {
                 try {
+                    val currentKey = if (attempt == 0) input.idempotencyKey else "${input.idempotencyKey}_r$attempt"
                     if (attempt > 0) {
-                        Log.d("RemindlyBackend", "Retry attempt $attempt for key: ${input.idempotencyKey}")
+                        Log.d("RemindlyBackend", "Retry attempt $attempt for key: $currentKey")
                     }
 
                     val idToken = try {
@@ -71,12 +75,10 @@ class RemindlyBackendExtractor(
 
                     val requestBuilder = Request.Builder()
                         .url("$backendBaseUrl/v1/extract-data")
-                        .addHeader("Idempotency-Key", input.idempotencyKey)
+                        .addHeader("Idempotency-Key", currentKey)
                         .addHeader("X-User-Tier", tier.name.lowercase())
                         .addHeader("X-Client-Date", currentDate)
                         .addHeader("X-User-Timezone", timezone)
-                        .addHeader("CF-Access-Client-Id", com.victorkirui.core.BuildConfig.CF_ACCESS_CLIENT_ID)
-                        .addHeader("CF-Access-Client-Secret", com.victorkirui.core.BuildConfig.CF_ACCESS_CLIENT_SECRET)
 
                     if (idToken != null) {
                         requestBuilder.addHeader("Authorization", "Bearer $idToken")
@@ -87,7 +89,7 @@ class RemindlyBackendExtractor(
                         val multipartBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
                         input.text?.let { multipartBuilder.addFormDataPart("text", it) }
                         input.url?.let { multipartBuilder.addFormDataPart("url", it) }
-                        multipartBuilder.addFormDataPart("idempotencyKey", input.idempotencyKey)
+                        multipartBuilder.addFormDataPart("idempotencyKey", currentKey)
                         multipartBuilder.addFormDataPart("currentDate", currentDate)
                         multipartBuilder.addFormDataPart("timezone", timezone)
 
@@ -101,7 +103,7 @@ class RemindlyBackendExtractor(
                     } else {
                         // JSON request
                         val jsonMap = mutableMapOf<String, Any?>(
-                            "idempotencyKey" to input.idempotencyKey,
+                            "idempotencyKey" to currentKey,
                             "currentDate" to currentDate,
                             "timezone" to timezone
                         )
@@ -111,6 +113,7 @@ class RemindlyBackendExtractor(
                         val jsonBody = gson.toJson(jsonMap).toRequestBody("application/json".toMediaTypeOrNull())
                         requestBuilder.post(jsonBody).build()
                     }
+
 
                     httpClient.newCall(request).execute().use { response ->
                         val responseBody = response.body?.string() ?: ""
@@ -180,7 +183,20 @@ class RemindlyBackendExtractor(
                                 }
                                 lastError = "Invalid server response data."
                             }
-                            429, 503, 504 -> {
+                            429 -> {
+                                val apiResponse = try { gson.fromJson(responseBody, BackendApiResponse::class.java) } catch(e: Exception) { null }
+                                val qLimit = apiResponse?.quota?.limit ?: 10
+                                subscriptionRepository.updateQuota(qLimit, 0)
+                                val quotaMsg = apiResponse?.error?.message 
+                                    ?: "Monthly capture limit reached. Upgrade to Remindly Pro for 250 monthly extractions."
+                                return@withContext AiResult.Error(quotaMsg, isTransient = false)
+                            }
+                            402 -> {
+                                val apiResponse = try { gson.fromJson(responseBody, BackendApiResponse::class.java) } catch(e: Exception) { null }
+                                subscriptionRepository.updateQuota(10, 0)
+                                return@withContext AiResult.Error(apiResponse?.error?.message ?: "Monthly capture limit reached. Upgrade to Remindly Pro for 250 monthly extractions.", isTransient = false)
+                            }
+                            503, 504 -> {
                                 if (attempt < MAX_RETRIES) {
                                     val backoffMs = calculateBackoff(attempt, retryAfter)
                                     delay(backoffMs)
@@ -232,35 +248,37 @@ class RemindlyBackendExtractor(
         }
     }
 
-    private data class BackendApiResponse(
-        val success: Boolean,
-        val data: ExtractedPayload?,
-        val quota: QuotaPayload?,
-        val error: ErrorPayload?,
-        val metadata: Map<String, Any>?
-    )
-
-    private data class ExtractedPayload(
-        val id: String?,
-        val title: String?,
-        val summary: String?,
-        val category: String?,
-        val deadline: String?,
-        val eventDate: String?,
-        val organization: String?,
-        val strategy: String?,
-        val checklist: List<String>?,
-        val extractedAt: String?
-    )
-
-    private data class QuotaPayload(
-        val limit: Int,
-        val remaining: Int,
-        val resetInSeconds: Int
-    )
-
-    private data class ErrorPayload(
-        val code: String,
-        val message: String
-    )
 }
+
+data class BackendApiResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("data") val data: ExtractedPayload? = null,
+    @SerializedName("quota") val quota: QuotaPayload? = null,
+    @SerializedName("error") val error: ErrorPayload? = null,
+    @SerializedName("metadata") val metadata: Map<String, Any>? = null
+)
+
+data class ExtractedPayload(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("title") val title: String? = null,
+    @SerializedName("summary") val summary: String? = null,
+    @SerializedName("category") val category: String? = null,
+    @SerializedName("deadline") val deadline: String? = null,
+    @SerializedName("eventDate") val eventDate: String? = null,
+    @SerializedName("organization") val organization: String? = null,
+    @SerializedName("strategy") val strategy: String? = null,
+    @SerializedName("checklist") val checklist: List<String>? = null,
+    @SerializedName("extractedAt") val extractedAt: String? = null
+)
+
+data class QuotaPayload(
+    @SerializedName("limit") val limit: Int = 0,
+    @SerializedName("remaining") val remaining: Int = 0,
+    @SerializedName("resetInSeconds") val resetInSeconds: Int = 0
+)
+
+data class ErrorPayload(
+    @SerializedName("code") val code: String? = null,
+    @SerializedName("message") val message: String? = null
+)
+

@@ -49,6 +49,7 @@ fun ProfileScreen(
     windowWidthSizeClass: WindowWidthSizeClass,
     onSignOut: () -> Unit = {},
     onShowWalkthrough: () -> Unit = {},
+    onNavigateToHome: () -> Unit = {},
     viewModel: ProfileViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -182,8 +183,10 @@ fun ProfileScreen(
         SubscriptionPaywallSheet(
             onDismiss = { showSubscriptionPlans = false },
             onPlanSelected = { tier ->
-                viewModel.setSubscriptionTier(tier)
                 showSubscriptionPlans = false
+                if (tier == SubscriptionTier.PREMIUM) {
+                    onNavigateToHome()
+                }
             }
         )
     }
@@ -215,20 +218,6 @@ fun ProfileScreenContent(
         modifier = Modifier.statusBarsPadding()
     ) { paddingValues ->
         when (windowWidthSizeClass) {
-            WindowWidthSizeClass.Medium -> ProfileMediumContent(
-                state = uiState,
-                modifier = Modifier.padding(paddingValues),
-                onSignOut = onSignOut,
-                onDeleteAccount = onDeleteAccount,
-                onToggleMorningBriefing = onToggleMorningBriefing,
-                onToggleDeadlineAlerts = onToggleDeadlineAlerts,
-                onShowTimePicker = onShowTimePicker,
-                onShowLeadTimePicker = onShowLeadTimePicker,
-                onToggleCalendarSync = onToggleCalendarSync,
-                onShowWidgetsGallery = onShowWidgetsGallery,
-                onUpgrade = onUpgrade,
-                onShowWalkthrough = onShowWalkthrough
-            )
             WindowWidthSizeClass.Expanded -> ProfileLargeContent(
                 state = uiState,
                 modifier = Modifier.padding(paddingValues),
@@ -482,11 +471,6 @@ fun ProfileMediumContent(
                     onShowWidgetsGallery = onShowWidgetsGallery
                 )
             }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            ProfileSectionHeader("GENERAL")
-            GeneralCardMedium(onShowWalkthrough = onShowWalkthrough)
         }
 
         VerticalDivider(
@@ -518,6 +502,11 @@ fun ProfileMediumContent(
                 onShowLeadTimePicker = onShowLeadTimePicker
             )
             
+            Spacer(modifier = Modifier.height(24.dp))
+
+            ProfileSectionHeader("GENERAL")
+            GeneralCardMedium(onShowWalkthrough = onShowWalkthrough)
+
             Spacer(modifier = Modifier.height(24.dp))
             
             ProfileSectionHeader("FEEDBACK & RATING")
@@ -650,17 +639,13 @@ fun ProfileLargeContent(
             
             Spacer(modifier = Modifier.height(32.dp))
             
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    ProfileSectionHeader("GENERAL")
-                    GeneralCardLarge(onShowWalkthrough = onShowWalkthrough)
-                }
-                
-                Column(modifier = Modifier.weight(1f)) {
-                    ProfileSectionHeader("FEEDBACK & RATING")
-                    SupportCardLarge()
-                }
-            }
+            ProfileSectionHeader("GENERAL")
+            GeneralCardLarge(onShowWalkthrough = onShowWalkthrough)
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            ProfileSectionHeader("FEEDBACK & RATING")
+            SupportCardLarge()
         }
     }
 }
@@ -825,9 +810,26 @@ fun GeneralCardLarge(onShowWalkthrough: () -> Unit = {}) {
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
             SettingItemMedium(
+                title = "Terms & Conditions",
+                value = null,
+                icon = Icons.Outlined.Description,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/terms-and-conditions"))
+                    context.startActivity(intent)
+                }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFF0F0F0))
+            SettingItemMedium(
                 title = "About Remindly",
-                value = "v1.0.0",
-                icon = Icons.Outlined.Info
+                value = remember(context) {
+                    try { "v${context.packageManager.getPackageInfo(context.packageName, 0).versionName}" } catch (e: Exception) { "v2.0.0" }
+                },
+                icon = Icons.Outlined.Info,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly"))
+                    context.startActivity(intent)
+                }
             )
         }
     }
@@ -849,7 +851,7 @@ fun SupportCardLarge() {
                 onClick = {
                     val intent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:")
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("remindly.productivity@gmail.com"))
                         putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
                     }
                     context.startActivity(intent)
@@ -919,11 +921,13 @@ fun SubscriptionPlansDialog(
                 PlanFeatureRow("Structured Captures", true)
                 PlanFeatureRow("Actionable Steps", true)
                 PlanFeatureRow("Daily Briefings", true)
+                PlanFeatureRow("Gemini AI Voice & Assistant Actions", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
                 PlanFeatureRow("Rich AI Summaries", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
                 PlanFeatureRow("Visual OCR (Flyers/Receipts)", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
                 PlanFeatureRow("Deep Web Synthesis", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
-                PlanFeatureRow("Unlimited PDF Processing", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
-                PlanFeatureRow("10x Higher Quotas", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("Multi-Page PDF Processing (up to 50 pages)", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+                PlanFeatureRow("250 Monthly AI Extractions (25x Quota)", currentTier == SubscriptionTier.PREMIUM, isPremium = true)
+
             }
         }
     )
@@ -1069,6 +1073,19 @@ fun PremiumFeaturesCard(
     onToggleCalendarSync: (Boolean) -> Unit,
     onShowWidgetsGallery: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.values.all { it }
+        if (granted) {
+            onToggleCalendarSync(true)
+        } else {
+            android.widget.Toast.makeText(context, "Calendar permission is required to auto-sync events.", android.widget.Toast.LENGTH_SHORT).show()
+            onToggleCalendarSync(false)
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -1076,10 +1093,27 @@ fun PremiumFeaturesCard(
     ) {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
             NotificationItem(
-                title = "Google Calendar Sync",
-                subtitle = "Auto-sync events to your phone",
+                title = "Calendar Auto-Sync",
+                subtitle = "Auto-sync deadlines & events to your phone calendar",
                 checked = isCalendarSyncEnabled,
-                onCheckedChange = onToggleCalendarSync
+                onCheckedChange = { enabling ->
+                    if (enabling) {
+                        val hasWrite = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        val hasRead = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (hasWrite && hasRead) {
+                            onToggleCalendarSync(true)
+                        } else {
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.WRITE_CALENDAR,
+                                    android.Manifest.permission.READ_CALENDAR
+                                )
+                            )
+                        }
+                    } else {
+                        onToggleCalendarSync(false)
+                    }
+                }
             )
             SettingItem(
                 title = "Widgets",
@@ -1103,12 +1137,21 @@ fun UserInfoSection(name: String, email: String) {
                 .background(Color(0xFF2D6A4F)),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                name.take(1).uppercase(),
-                color = Color.White,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Normal
-            )
+            if (name.isNotBlank() && name != "User") {
+                Text(
+                    name.take(1).uppercase(),
+                    color = Color.White,
+                    fontSize = 36.sp,
+                    fontWeight = FontWeight.Normal
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Profile",
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -1138,12 +1181,21 @@ fun UserInfoRow(name: String, email: String) {
                 .background(Color(0xFF2D6A4F)),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                name.take(1).uppercase(),
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Medium
-            )
+            if (name.isNotBlank() && name != "User") {
+                Text(
+                    name.take(1).uppercase(),
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Profile",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
         }
         
         Spacer(modifier = Modifier.width(16.dp))
@@ -1199,8 +1251,22 @@ fun GeneralCard(onShowWalkthrough: () -> Unit = {}) {
                 }
             )
             SettingItem(
+                title = "Terms & Conditions",
+                value = null,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/terms-and-conditions"))
+                    context.startActivity(intent)
+                }
+            )
+            SettingItem(
                 title = "About Remindly",
-                value = "Version 1.0.0"
+                value = remember(context) {
+                    try { "Version ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}" } catch (e: Exception) { "Version 2.0.0" }
+                },
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly"))
+                    context.startActivity(intent)
+                }
             )
         }
     }
@@ -1231,9 +1297,25 @@ fun GeneralCardMedium(onShowWalkthrough: () -> Unit = {}) {
                 }
             )
             SettingItemMedium(
+                title = "Terms & Conditions",
+                value = null,
+                icon = Icons.Outlined.Description,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly/terms-and-conditions"))
+                    context.startActivity(intent)
+                }
+            )
+
+            SettingItemMedium(
                 title = "About Remindly",
-                value = "v1.0.0",
-                icon = Icons.Outlined.Info
+                value = remember(context) {
+                    try { "v${context.packageManager.getPackageInfo(context.packageName, 0).versionName}" } catch (e: Exception) { "v2.0.0" }
+                },
+                icon = Icons.Outlined.Info,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://victor-kirui.dev/remindly"))
+                    context.startActivity(intent)
+                }
             )
         }
     }
@@ -1255,7 +1337,7 @@ fun SupportCardMedium() {
                 onClick = {
                     val intent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:")
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("remindly.productivity@gmail.com"))
                         putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
                     }
                     context.startActivity(intent)
@@ -1285,11 +1367,11 @@ fun SupportCard() {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
             SettingItem(
                 title = "Send Feedback",
-                value = "Email victorkirui.dev@gmail.com",
+                value = "Email remindly.productivity@gmail.com",
                 onClick = {
                     val intent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:")
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf("victorkirui.dev@gmail.com"))
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("remindly.productivity@gmail.com"))
                         putExtra(Intent.EXTRA_SUBJECT, "Remindly Feedback")
                     }
                     context.startActivity(intent)

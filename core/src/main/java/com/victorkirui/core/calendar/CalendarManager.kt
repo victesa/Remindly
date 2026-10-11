@@ -1,5 +1,6 @@
 package com.victorkirui.core.calendar
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -13,11 +14,12 @@ class CalendarManager(private val context: Context) {
 
     /**
      * Adds an event to the primary calendar.
+     * Checks if a matching event already exists in the calendar before creating a new one.
      * 
      * @param title Title of the event
      * @param description Summary/Notes for the event
      * @param eventDate ISO 8601 date string
-     * @return The URI of the created event or null if failed
+     * @return The URI of the created or existing event or null if failed
      */
     fun addEvent(title: String, description: String?, eventDate: String, location: String? = null): Uri? {
         val calendarId = getPrimaryCalendarId() ?: run {
@@ -45,6 +47,13 @@ class CalendarManager(private val context: Context) {
             } else {
                 startMillis = dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 endMillis = startMillis + 1800000 // Default 30 mins
+            }
+
+            // Deduplication Check: Check if this event already exists in Google / Device Calendar
+            val existingUri = findExistingEvent(calendarId, title, startMillis)
+            if (existingUri != null) {
+                Log.d("CalendarManager", "Event '$title' already exists in calendar ($existingUri). Returning existing URI without inserting duplicate.")
+                return existingUri
             }
 
             val values = ContentValues().apply {
@@ -89,6 +98,56 @@ class CalendarManager(private val context: Context) {
             Log.d("CalendarManager", "Reminder added for event: $eventId")
         } catch (e: Exception) {
             Log.e("CalendarManager", "Failed to add reminder", e)
+        }
+    }
+
+    /**
+     * Checks if a calendar event with the same title and start time already exists in the calendar provider.
+     * Prevents duplicate event creation across synced devices sharing the same calendar account.
+     */
+    fun findExistingEvent(calendarId: Long, title: String, startMillis: Long): Uri? {
+        val projection = arrayOf(CalendarContract.Events._ID)
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.TITLE} = ? AND ${CalendarContract.Events.DTSTART} = ?"
+        val selectionArgs = arrayOf(calendarId.toString(), title, startMillis.toString())
+
+        return try {
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val eventId = cursor.getLong(0)
+                    val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
+                    Log.d("CalendarManager", "Found existing matching calendar event: $uri for title '$title'")
+                    uri
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CalendarManager", "Error querying existing event: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
+     * Deletes a calendar event by its URI string.
+     * @param eventUriString URI string stored in item metadata
+     * @return true if successfully deleted, false otherwise
+     */
+    fun deleteEvent(eventUriString: String?): Boolean {
+        if (eventUriString.isNullOrBlank()) return false
+        return try {
+            val uri = Uri.parse(eventUriString)
+            val rowsDeleted = context.contentResolver.delete(uri, null, null)
+            Log.d("CalendarManager", "Deleted calendar event URI: $eventUriString, rowsDeleted: $rowsDeleted")
+            rowsDeleted > 0
+        } catch (e: Exception) {
+            Log.e("CalendarManager", "Failed to delete calendar event $eventUriString: ${e.message}", e)
+            false
         }
     }
 

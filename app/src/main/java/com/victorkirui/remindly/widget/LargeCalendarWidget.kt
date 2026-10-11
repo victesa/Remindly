@@ -63,28 +63,22 @@ class LargeCalendarWidget : GlanceAppWidget() {
                             val dateStr = item.deadline ?: item.eventDate
                             if (dateStr != null) {
                                 try {
-                                    val itemDate = if (dateStr.contains("T")) {
-                                        java.time.LocalDateTime.parse(dateStr.substringBefore("Z")).toLocalDate()
-                                    } else {
-                                        LocalDate.parse(dateStr)
-                                    }
+                                    val itemDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(dateStr)
 
                                     val isUrgent = item.deadline?.let { deadline ->
                                         try {
-                                            val deadlineDate = if (deadline.contains("T")) {
-                                                java.time.LocalDateTime.parse(deadline.substringBefore("Z")).toLocalDate()
-                                            } else {
-                                                LocalDate.parse(deadline)
-                                            }
-                                            ChronoUnit.DAYS.between(today, deadlineDate) <= 1
+                                            val deadlineDate = com.victorkirui.core.util.DateUtils.parseToLocalDate(deadline)
+                                            deadlineDate != null && ChronoUnit.DAYS.between(today, deadlineDate) <= 1
                                         } catch (_: Exception) { false }
                                     } ?: false
 
-                                    val currentDot = dayDotsMap[itemDate]
-                                    if (isUrgent) {
-                                        dayDotsMap[itemDate] = DotType.RED
-                                    } else if (currentDot != DotType.RED) {
-                                        dayDotsMap[itemDate] = DotType.GREEN
+                                    if (itemDate != null) {
+                                        val currentDot = dayDotsMap[itemDate]
+                                        if (isUrgent) {
+                                            dayDotsMap[itemDate] = DotType.RED
+                                        } else if (currentDot != DotType.RED) {
+                                            dayDotsMap[itemDate] = DotType.GREEN
+                                        }
                                     }
                                 } catch (_: Exception) {}
                             }

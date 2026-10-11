@@ -1,0 +1,5 @@
+-keepattributes Signature, InnerClasses, EnclosingMethod
+-keep class com.victorkirui.remote.** { *; }
+-keepclassmembers class com.victorkirui.remote.** { *; }
+-keep interface com.victorkirui.remote.CaptureApi { *; }
+-keepclassmembers interface com.victorkirui.remote.CaptureApi { *; }

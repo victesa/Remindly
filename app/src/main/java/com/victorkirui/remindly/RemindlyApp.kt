@@ -9,6 +9,7 @@ import com.victorkirui.core.monitoring.Analytics
 import com.victorkirui.core.repository.SubscriptionRepository
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
@@ -27,8 +28,41 @@ class RemindlyApp : Application() {
 
         val analytics: Analytics = get()
         val subscriptionRepository: SubscriptionRepository = get()
+        val localRepository: com.victorkirui.local.repository.LocalRepository = get()
+        val authRepository: com.victorkirui.core.repository.AuthRepository = get()
+
+        subscriptionRepository.onSyncLocalItemsToBackend = {
+            val userId = authRepository.currentUser.value?.uid
+            if (userId != null) {
+                val items = localRepository.getAllItems(userId).first()
+                items.forEach { item ->
+                    localRepository.addPendingSync(com.victorkirui.local.entity.PendingSync(itemId = item.id))
+                }
+                com.victorkirui.module_features.capturing.SyncWorker.schedule(this)
+                android.util.Log.d("RemindlyApp", "Enqueued ${items.size} local items for background sync after Pro upgrade.")
+            }
+        }
 
         analytics.logEvent("app_start")
+
+        // Log Firebase Installation ID (FID) for testing Firebase In-App Messaging campaigns
+        com.google.firebase.installations.FirebaseInstallations.getInstance().id.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                android.util.Log.i("FIAM_TEST", "Firebase Installation ID (FID) for testing: ${task.result}")
+            }
+        }
+
+        // Log FCM Registration Token for testing push notifications
+        com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                android.util.Log.i("FCM_TOKEN", "FCM Registration Token for testing: ${task.result}")
+            }
+        }
+
+
+        // Schedule periodic background entitlement revalidation with backend (every 12 hours)
+        com.victorkirui.module_features.subscription.EntitlementRevalidationWorker.schedule(this)
+
 
         MainScope().launch {
             subscriptionRepository.subscriptionTier.distinctUntilChanged().collect { tier ->

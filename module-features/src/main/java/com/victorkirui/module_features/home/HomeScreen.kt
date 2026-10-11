@@ -40,6 +40,8 @@ import com.victorkirui.core.util.DateUtils
 import com.victorkirui.module_features.capturing.SourceIcon
 import com.victorkirui.module_features.capturing.SourceIconProvider
 import com.victorkirui.module_features.capturing.SyncDownWorker
+import com.victorkirui.core.repository.SubscriptionRepository
+import com.victorkirui.core.repository.SubscriptionTier
 import com.victorkirui.module_features.inbox.SearchField
 import androidx.compose.ui.text.style.TextOverflow
 import org.koin.androidx.compose.koinViewModel
@@ -53,18 +55,13 @@ import java.util.*
 fun HomeScreen(
     windowWidthSizeClass: WindowWidthSizeClass,
     onNavigateToInbox: () -> Unit = {},
-    onNavigateToReminders: () -> Unit = {},
+    onNavigateToReminders: (String?) -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToItem: (String) -> Unit = {},
-    onCaptureClick: () -> Unit = {},
+    onNavigateToCategory: (String) -> Unit = {},
     viewModel: HomeViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    LaunchedEffect(Unit) {
-        SyncDownWorker.schedule(context)
-    }
 
     HomeScreen(
         uiState = uiState,
@@ -73,7 +70,7 @@ fun HomeScreen(
         onNavigateToReminders = onNavigateToReminders,
         onNavigateToProfile = onNavigateToProfile,
         onNavigateToItem = onNavigateToItem,
-        onCaptureClick = onCaptureClick,
+        onNavigateToCategory = onNavigateToCategory,
         onSearchQueryChange = { viewModel.onSearchQueryChange(it) },
         onNameUpdate = { viewModel.updateUserName(it) },
         onRefresh = { viewModel.refresh() }
@@ -86,10 +83,10 @@ fun HomeScreen(
     uiState: HomeUiState,
     windowWidthSizeClass: WindowWidthSizeClass,
     onNavigateToInbox: () -> Unit = {},
-    onNavigateToReminders: () -> Unit = {},
+    onNavigateToReminders: (String?) -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToItem: (String) -> Unit = {},
-    onCaptureClick: () -> Unit = {},
+    onNavigateToCategory: (String) -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
     onNameUpdate: (String) -> Unit = {},
     onRefresh: () -> Unit = {}
@@ -97,6 +94,14 @@ fun HomeScreen(
     val isLargeScreen = windowWidthSizeClass == WindowWidthSizeClass.Expanded
     val isMediumScreen = windowWidthSizeClass == WindowWidthSizeClass.Medium
     var isSearchSheetVisible by remember { mutableStateOf(false) }
+
+    val subscriptionRepository: SubscriptionRepository = org.koin.compose.koinInject()
+    val activeSubscriptionTier by subscriptionRepository.subscriptionTier.collectAsState(initial = SubscriptionTier.FREE)
+    val isInitialSyncPending by subscriptionRepository.isInitialSyncPending.collectAsState(initial = false)
+
+    if (isInitialSyncPending) {
+        SyncLoadingDialog("Syncing your saved items...")
+    }
 
     val searchQuery = (uiState as? HomeUiState.Success)?.searchQuery ?: ""
     val searchResults = (uiState as? HomeUiState.Success)?.searchResults ?: emptyList()
@@ -116,16 +121,11 @@ fun HomeScreen(
 
     val pullRefreshState = rememberPullToRefreshState()
     val isSyncingFromState = (uiState as? HomeUiState.Success)?.isSyncing ?: false
-    var displaySyncIndicator by remember { mutableStateOf(false) }
+    var isManualRefreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(isSyncingFromState) {
-        if (isSyncingFromState) {
-            displaySyncIndicator = true
-            // Safety timeout: Never irritate user with endless progress display (max 5s)
-            kotlinx.coroutines.delay(5000L)
-            displaySyncIndicator = false
-        } else {
-            displaySyncIndicator = false
+        if (!isSyncingFromState) {
+            isManualRefreshing = false
         }
     }
 
@@ -134,8 +134,11 @@ fun HomeScreen(
             .fillMaxSize()
             .pullToRefresh(
                 state = pullRefreshState,
-                isRefreshing = displaySyncIndicator,
-                onRefresh = onRefresh
+                isRefreshing = isManualRefreshing,
+                onRefresh = {
+                    isManualRefreshing = true
+                    onRefresh()
+                }
             )
     ) {
         Column(
@@ -144,15 +147,15 @@ fun HomeScreen(
                 .background(Color.White)
                 .statusBarsPadding()
         ) {
-            if (!isLargeScreen && !isMediumScreen) {
+            if (!isLargeScreen) {
                 RemindlyTopBar(
                     onSearchToggle = { isSearchSheetVisible = true },
                     isSearchActive = isSearchSheetVisible,
-                    subscriptionTier = (uiState as? HomeUiState.Success)?.subscriptionTier ?: com.victorkirui.core.repository.SubscriptionTier.FREE
+                    subscriptionTier = activeSubscriptionTier
                 ) 
             } 
             
-            if (displaySyncIndicator) {
+            if (isManualRefreshing) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth().height(2.dp),
                     color = Color(0xFF2D6A4F),
@@ -172,21 +175,19 @@ fun HomeScreen(
                         state = state,
                         modifier = Modifier.weight(1f),
                         onNavigateToItem = onNavigateToItem,
+                        onNavigateToInbox = onNavigateToInbox,
+                        onNavigateToReminders = onNavigateToReminders,
                         onSearchClick = { isSearchSheetVisible = true },
-                        onCaptureClick = onCaptureClick
-                    )
-                    WindowWidthSizeClass.Medium -> HomeScreenMediumContent(
-                        state = state,
-                        modifier = Modifier.weight(1f),
-                        onNavigateToItem = onNavigateToItem,
-                        onSearchClick = { isSearchSheetVisible = true },
-                        onCaptureClick = onCaptureClick
+                        onNavigateToCategory = onNavigateToCategory
                     )
                     else -> HomeScreenContent(
                         state = state,
                         modifier = Modifier.weight(1f),
                         isLargeScreen = false,
-                        onNavigateToItem = onNavigateToItem
+                        onNavigateToItem = onNavigateToItem,
+                        onNavigateToInbox = onNavigateToInbox,
+                        onNavigateToReminders = onNavigateToReminders,
+                        onNavigateToCategory = onNavigateToCategory
                     )
                 }
             }
@@ -244,127 +245,322 @@ fun HomeScreenContent(
     state: HomeUiState.Success,
     modifier: Modifier = Modifier,
     isLargeScreen: Boolean,
-    onNavigateToItem: (String) -> Unit = {}
+    onNavigateToItem: (String) -> Unit = {},
+    onNavigateToInbox: () -> Unit = {},
+    onNavigateToReminders: (String?) -> Unit = {},
+    onNavigateToCategory: (String) -> Unit = {}
 ) {
-    val scrollState = rememberScrollState()
     val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
-    
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp)
-    ) {
-        GreetingSection(
-            userName = state.userName, 
-            attentionCount = state.todayItems.size,
-            isPremium = isPremium
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var showNotificationBanner by remember {
+        mutableStateOf(
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
         )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        CalendarStrip(items = state.allItems)
-        
-        if (isPremium && state.isCalendarSyncEnabled) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Sync,
-                    contentDescription = null,
-                    tint = Color(0xFF4285F4),
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    "Auto-sync enabled",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray,
-                    fontSize = 10.sp
+    }
+
+    val notificationLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        showNotificationBanner = false
+    }
+
+    if (state.allItems.isEmpty()) {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+        ) {
+            GreetingSection(
+                userName = state.userName, 
+                attentionCount = state.todayItems.size,
+                isPremium = isPremium
+            )
+
+            if (showNotificationBanner) {
+                Spacer(modifier = Modifier.height(12.dp))
+                NotificationPermissionBanner(
+                    onEnableClick = {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            showNotificationBanner = false
+                        }
+                    },
+                    onDismissClick = { showNotificationBanner = false }
                 )
             }
-        }
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        SectionHeader("TODAY")
-        if (state.todayItems.isNotEmpty()) {
-            state.todayItems.take(2).forEach { item ->
-                val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
-                    ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
-                    ?: "Today"
-                
-                if (isPremium) {
-                    ProTaskItem(
-                        title = item.title,
-                        time = displayTime,
-                        summary = item.summary,
-                        tag = "Today",
-                        onClick = { onNavigateToItem(item.id) }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            CalendarStrip(items = state.allItems)
+            
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(12.dp)
                     )
-                } else {
-                    TaskItem(
-                        title = item.title,
-                        time = displayTime,
-                        icon = Icons.Default.AccessTime,
-                        iconBgColor = Color(0xFFEAF2EE),
-                        tag = "Today",
-                        tagColor = Color(0xFFFEF5E7),
-                        tagTextColor = Color(0xFFD35400),
-                        onClick = { onNavigateToItem(item.id) }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Auto-sync enabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 10.sp
                     )
                 }
-                Spacer(modifier = Modifier.height(12.dp))
             }
-        } else {
-            EmptySectionPlaceholder("No tasks for today. Stay productive!")
+            
+            Spacer(modifier = Modifier.height(16.dp))
+
+            HomeEmptyStateCard(modifier = Modifier.fillMaxWidth())
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
-        
-        Spacer(modifier = Modifier.height(20.dp))
-        
-        SectionHeader("LAST ANALYSED")
-        if (state.lastAnalysed.isNotEmpty()) {
-            AnalysedSection(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
-        } else {
-            EmptySectionPlaceholder("Recent captures will appear here.")
-        }
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        SectionHeader("UPCOMING")
-        if (state.upcomingItems.isNotEmpty()) {
-            state.upcomingItems.take(3).forEach { item ->
-                val deadline = item.deadline
-                val daysLeft = if (deadline != null) {
-                    try {
-                        ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
-                    } catch (e: Exception) { 0 }
-                } else 0
-                val icon = SourceIconProvider.getIconForSource(item.source)
-                UpcomingTaskItem(
-                    title = item.title,
-                    subtitle = item.organization ?: item.source ?: "",
-                    tag = when {
-                        daysLeft == 0L -> "Today"
-                        daysLeft == 1L -> "1 day left"
-                        daysLeft < 0 -> "Overdue"
-                        else -> "$daysLeft days left"
+    } else {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp)
+        ) {
+            GreetingSection(
+                userName = state.userName, 
+                attentionCount = state.todayItems.size,
+                isPremium = isPremium
+            )
+
+            if (showNotificationBanner) {
+                Spacer(modifier = Modifier.height(12.dp))
+                NotificationPermissionBanner(
+                    onEnableClick = {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            showNotificationBanner = false
+                        }
                     },
-                    iconRes = (icon as? SourceIcon.Resource)?.resId,
-                    icon = (icon as? SourceIcon.Vector)?.imageVector,
-                    onClick = { onNavigateToItem(item.id) }
+                    onDismissClick = { showNotificationBanner = false }
                 )
-                Spacer(modifier = Modifier.height(12.dp))
             }
-        } else {
-            EmptySectionPlaceholder("No upcoming deadlines. You're ahead!")
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            CalendarStrip(items = state.allItems)
+            
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Auto-sync enabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            SectionHeader("TODAY", onViewAllClick = { onNavigateToReminders(LocalDate.now().toString()) })
+            if (state.todayItems.isNotEmpty()) {
+                state.todayItems.take(5).forEach { item ->
+                    val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
+                        ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
+                        ?: "Today"
+                    
+                    if (isPremium) {
+                        ProTaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            summary = item.summary,
+                            tag = "Today",
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    } else {
+                        TaskItem(
+                            title = item.title,
+                            time = displayTime,
+                            icon = Icons.Default.AccessTime,
+                            iconBgColor = Color(0xFFEAF2EE),
+                            tag = "Today",
+                            tagColor = Color(0xFFFEF5E7),
+                            tagTextColor = Color(0xFFD35400),
+                            onClick = { onNavigateToItem(item.id) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            } else {
+                EmptySectionPlaceholder("No tasks for today. Stay productive!")
+            }
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            SectionHeader("LAST ANALYSED", onViewAllClick = onNavigateToInbox)
+            if (state.lastAnalysed.isNotEmpty()) {
+                AnalysedSection(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
+            } else {
+                EmptySectionPlaceholder("Recent captures will appear here.")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            SectionHeader("UPCOMING", onViewAllClick = { onNavigateToReminders(LocalDate.now().plusDays(1).toString()) })
+            if (state.upcomingItems.isNotEmpty()) {
+                state.upcomingItems.take(5).forEach { item ->
+                    val deadline = item.deadline
+                    val daysLeft = if (deadline != null) {
+                        try {
+                            ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                        } catch (e: Exception) { 0 }
+                    } else 0
+                    val icon = SourceIconProvider.getIconForSource(item.source)
+                    UpcomingTaskItem(
+                        title = item.title,
+                        subtitle = item.organization ?: item.source ?: "",
+                        tag = when {
+                            daysLeft == 0L -> "Today"
+                            daysLeft == 1L -> "1 day left"
+                            daysLeft < 0 -> "Overdue"
+                            else -> "$daysLeft days left"
+                        },
+                        iconRes = (icon as? SourceIcon.Resource)?.resId,
+                        icon = (icon as? SourceIcon.Vector)?.imageVector,
+                        onClick = { onNavigateToItem(item.id) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            } else {
+                EmptySectionPlaceholder("No upcoming deadlines. You're ahead!")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            SectionHeader("CATEGORIES", onViewAllClick = onNavigateToInbox)
+            if (state.categories.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.categories.take(5).forEach { category ->
+                        HomeCategoryCard(
+                            category = category,
+                            onClick = { onNavigateToCategory(category.id) }
+                        )
+                    }
+                }
+            } else {
+                EmptySectionPlaceholder("No categories yet.")
+            }
+            Spacer(modifier = Modifier.height(80.dp))
         }
-        
-        Spacer(modifier = Modifier.height(100.dp))
+    }
+}
+
+@Composable
+fun HomeEmptyStateCard(
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFF9FAF9),
+        border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFEAF2EE)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color(0xFF2D6A4F),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                "You're all set!",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                "No captures or deadlines yet. Use the Capture button to analyze job postings, events, or notes with AI.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                color = Color(0xFF2D6A4F).copy(alpha = 0.08f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lightbulb,
+                        contentDescription = null,
+                        tint = Color(0xFF2D6A4F),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Tip: Share links or screenshots directly into Remindly",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -372,19 +568,25 @@ fun HomeScreenContent(
 fun EmptySectionPlaceholder(text: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF9FAF9)
     ) {
-        Box(
-            modifier = Modifier.padding(24.dp),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Icon(
+                imageVector = Icons.Outlined.CheckCircle,
+                contentDescription = null,
+                tint = Color(0xFF2D6A4F),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -395,8 +597,10 @@ fun HomeScreenLargeContent(
     state: HomeUiState.Success,
     modifier: Modifier = Modifier,
     onNavigateToItem: (String) -> Unit = {},
+    onNavigateToInbox: () -> Unit = {},
+    onNavigateToReminders: (String?) -> Unit = {},
     onSearchClick: () -> Unit = {},
-    onCaptureClick: () -> Unit = {}
+    onNavigateToCategory: (String) -> Unit = {}
 ) {
     val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
     
@@ -405,7 +609,38 @@ fun HomeScreenLargeContent(
             .fillMaxSize()
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Text(
+                    "Remindly",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2D6A4F),
+                    fontSize = 22.sp
+                )
+                if (isPremium) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        color = Color(0xFFD4AF37),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "Pro",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
             GreetingSection(
                 userName = state.userName, 
                 attentionCount = state.todayItems.size, 
@@ -413,7 +648,7 @@ fun HomeScreenLargeContent(
                 titleColor = Color(0xFF111111),
                 isPremium = isPremium
             )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             MonthCalendar(
                 items = state.allItems,
                 dayFontSize = 15.sp,
@@ -443,26 +678,21 @@ fun HomeScreenLargeContent(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.weight(1f))
-            
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clickable { onCaptureClick() },
-                color = Evergreen,
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Capture", color = Color.White, fontWeight = FontWeight.Bold)
+
+            SectionHeader("CATEGORIES", fontSize = 12.sp, color = Color(0xFF6B7C6E), onViewAllClick = onNavigateToInbox)
+            if (state.categories.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.categories.take(5).forEach { category ->
+                        HomeCategoryCard(
+                            category = category,
+                            onClick = { onNavigateToCategory(category.id) }
+                        )
+                    }
                 }
+            } else {
+                EmptySectionPlaceholder("No categories yet.")
             }
         }
 
@@ -476,9 +706,9 @@ fun HomeScreenLargeContent(
             LargeSearchBar(onClick = onSearchClick)
             Spacer(modifier = Modifier.height(32.dp))
 
-            SectionHeader("TODAY", fontSize = 12.sp, color = Color(0xFF6B7C6E))
+            SectionHeader("TODAY", fontSize = 12.sp, color = Color(0xFF6B7C6E), onViewAllClick = { onNavigateToReminders(LocalDate.now().toString()) })
             if (state.todayItems.isNotEmpty()) {
-                state.todayItems.take(2).forEach { item ->
+                state.todayItems.take(5).forEach { item ->
                     val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
                         ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
                         ?: "Today"
@@ -515,7 +745,7 @@ fun HomeScreenLargeContent(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            SectionHeader("LAST ANALYSED", fontSize = 12.sp, color = Color(0xFF6B7C6E))
+            SectionHeader("LAST ANALYSED", fontSize = 12.sp, color = Color(0xFF6B7C6E), onViewAllClick = onNavigateToInbox)
             if (state.lastAnalysed.isNotEmpty()) {
                 AnalysedSectionLarge(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
             } else {
@@ -524,9 +754,9 @@ fun HomeScreenLargeContent(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            SectionHeader("UPCOMING", fontSize = 12.sp, color = Color(0xFF6B7C6E))
+            SectionHeader("UPCOMING", fontSize = 12.sp, color = Color(0xFF6B7C6E), onViewAllClick = { onNavigateToReminders(LocalDate.now().plusDays(1).toString()) })
             if (state.upcomingItems.isNotEmpty()) {
-                state.upcomingItems.take(3).forEach { item ->
+                state.upcomingItems.take(5).forEach { item ->
                     val deadline = item.deadline
                     val daysLeft = if (deadline != null) {
                         try {
@@ -566,78 +796,24 @@ fun HomeScreenMediumContent(
     state: HomeUiState.Success,
     modifier: Modifier = Modifier,
     onNavigateToItem: (String) -> Unit = {},
+    onNavigateToInbox: () -> Unit = {},
+    onNavigateToReminders: (String?) -> Unit = {},
     onSearchClick: () -> Unit = {},
-    onCaptureClick: () -> Unit = {}
+    onNavigateToCategory: (String) -> Unit = {}
 ) {
     val isPremium = state.subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM
 
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            MonthCalendar(items = state.allItems, showLegend = true, dayFontSize = 13.sp)
-            
-            if (isPremium && state.isCalendarSyncEnabled) {
-                Row(
-                    modifier = Modifier.padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.CalendarToday,
-                        contentDescription = null,
-                        tint = Color(0xFF4285F4),
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        "Google Calendar synced",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-            
-            Surface(
+    if (state.allItems.isEmpty()) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+        ) {
+            // App Title Branding & Search
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-                    .clickable { onCaptureClick() },
-                color = Evergreen,
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("Capture", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            GreetingSection(
-                userName = state.userName, 
-                attentionCount = state.todayItems.size, 
-                titleSize = 20.sp, 
-                bodySize = 13.sp,
-                isPremium = isPremium
-            )
-        }
-
-        VerticalDivider(
-            modifier = Modifier.padding(horizontal = 24.dp).fillMaxHeight(),
-            color = Color(0xFFF0F0F0),
-            thickness = 1.dp
-        )
-
-        Column(
-            modifier = Modifier
-                .weight(1.2f)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
+                    .padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -647,7 +823,7 @@ fun HomeScreenMediumContent(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF2D6A4F),
-                        fontSize = 20.sp
+                        fontSize = 24.sp
                     )
                     if (isPremium) {
                         Spacer(modifier = Modifier.width(6.dp))
@@ -657,101 +833,250 @@ fun HomeScreenMediumContent(
                         ) {
                             Text(
                                 "Pro",
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 color = Color.White,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
+
                 IconButton(onClick = onSearchClick) {
-                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black, modifier = Modifier.size(24.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            LargeSearchBar(onClick = onSearchClick)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            SectionHeader("TODAY", fontSize = 10.sp)
-            if (state.todayItems.isNotEmpty()) {
-                state.todayItems.take(2).forEach { item ->
-                    val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
-                        ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
-                        ?: "Today"
-                    
-                    if (isPremium) {
-                        ProTaskItem(
-                            title = item.title,
-                            time = displayTime,
-                            summary = item.summary,
-                            tag = "Today",
-                            onClick = { onNavigateToItem(item.id) }
-                        )
-                    } else {
-                        TaskItem(
-                            title = item.title,
-                            time = displayTime,
-                            icon = Icons.Default.AccessTime,
-                            iconBgColor = Color(0xFFEAF2EE),
-                            tag = "Today",
-                            tagColor = Color(0xFF2D6A4F),
-                            tagTextColor = Color.White,
-                            titleFontSize = 14.sp,
-                            onClick = { onNavigateToItem(item.id) }
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-            } else {
-                EmptySectionPlaceholder("No tasks for today.")
-            }
+            GreetingSection(
+                userName = state.userName,
+                attentionCount = state.todayItems.size,
+                titleSize = 20.sp,
+                bodySize = 13.sp,
+                isPremium = isPremium
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            SectionHeader("LAST ANALYSED", fontSize = 10.sp)
-            if (state.lastAnalysed.isNotEmpty()) {
-                AnalysedSectionMedium(state.lastAnalysed.take(3), isPremium = isPremium, onNavigateToItem = onNavigateToItem)
-            } else {
-                EmptySectionPlaceholder("No recent captures.")
-            }
+            // Week Calendar Strip
+            CalendarStrip(items = state.allItems)
 
-            Spacer(modifier = Modifier.height(32.dp))
-
-            SectionHeader("UPCOMING", fontSize = 10.sp)
-            if (state.upcomingItems.isNotEmpty()) {
-                state.upcomingItems.take(3).forEach { item ->
-                    val deadline = item.deadline
-                    val daysLeft = if (deadline != null) {
-                        try {
-                            ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
-                        } catch (e: Exception) { 0 }
-                    } else 0
-                    val icon = SourceIconProvider.getIconForSource(item.source)
-                    UpcomingTaskItem(
-                        title = item.title,
-                        subtitle = item.organization ?: item.source ?: "",
-                        tag = when {
-                            daysLeft == 0L -> "Today"
-                            daysLeft == 1L -> "1 day left"
-                            daysLeft < 0 -> "Overdue"
-                            else -> "$daysLeft days left"
-                        },
-                        iconRes = (icon as? SourceIcon.Resource)?.resId,
-                        icon = (icon as? SourceIcon.Vector)?.imageVector,
-                        titleSize = 14.sp,
-                        subtitleSize = 12.sp,
-                        onClick = { onNavigateToItem(item.id) }
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Auto-sync enabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
                 }
-            } else {
-                EmptySectionPlaceholder("No upcoming deadlines.")
             }
-            Spacer(modifier = Modifier.height(80.dp))
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            HomeEmptyStateCard(modifier = Modifier.weight(1f))
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    } else {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+        ) {
+            // App Title Branding & Search
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Remindly",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2D6A4F),
+                        fontSize = 24.sp
+                    )
+                    if (isPremium) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = Color(0xFFD4AF37),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "Pro",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                IconButton(onClick = onSearchClick) {
+                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Black, modifier = Modifier.size(24.dp))
+                }
+            }
+
+            GreetingSection(
+                userName = state.userName,
+                attentionCount = state.todayItems.size,
+                titleSize = 20.sp,
+                bodySize = 13.sp,
+                isPremium = isPremium
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Week Calendar Strip
+            CalendarStrip(items = state.allItems)
+
+            if (isPremium && state.isCalendarSyncEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Color(0xFF4285F4),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Auto-sync enabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Two Columns: Today & Categories (Left), Last Analysed & Upcoming (Right)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Left Column: TODAY & CATEGORIES
+                Column(modifier = Modifier.weight(1f)) {
+                    SectionHeader("TODAY", fontSize = 11.sp, color = Color(0xFF6B7C6E), onViewAllClick = { onNavigateToReminders(LocalDate.now().toString()) })
+                    if (state.todayItems.isNotEmpty()) {
+                        state.todayItems.take(5).forEach { item ->
+                            val displayTime = item.deadline?.let { "Deadline: ${DateUtils.formatDisplayDate(it)}" }
+                                ?: item.eventDate?.let { DateUtils.formatDisplayDate(it) }
+                                ?: "Today"
+                            
+                            if (isPremium) {
+                                ProTaskItem(
+                                    title = item.title,
+                                    time = displayTime,
+                                    summary = item.summary,
+                                    tag = "Today",
+                                    onClick = { onNavigateToItem(item.id) }
+                                )
+                            } else {
+                                TaskItem(
+                                    title = item.title,
+                                    time = displayTime,
+                                    icon = Icons.Default.AccessTime,
+                                    iconBgColor = Color(0xFFEAF2EE),
+                                    tag = "Today",
+                                    tagColor = Color(0xFF2D6A4F),
+                                    tagTextColor = Color.White,
+                                    titleFontSize = 14.sp,
+                                    onClick = { onNavigateToItem(item.id) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    } else {
+                        EmptySectionPlaceholder("No tasks for today.")
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SectionHeader("CATEGORIES", fontSize = 11.sp, color = Color(0xFF6B7C6E), onViewAllClick = onNavigateToInbox)
+                    if (state.categories.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.categories.take(5).forEach { category ->
+                                HomeCategoryCard(
+                                    category = category,
+                                    onClick = { onNavigateToCategory(category.id) }
+                                )
+                            }
+                        }
+                    } else {
+                        EmptySectionPlaceholder("No categories yet.")
+                    }
+                }
+
+                // Right Column: LAST ANALYSED & UPCOMING
+                Column(modifier = Modifier.weight(1f)) {
+                    SectionHeader("LAST ANALYSED", fontSize = 11.sp, color = Color(0xFF6B7C6E), onViewAllClick = onNavigateToInbox)
+                    if (state.lastAnalysed.isNotEmpty()) {
+                        AnalysedSectionMedium(state.lastAnalysed, isPremium = isPremium, onNavigateToItem = onNavigateToItem)
+                    } else {
+                        EmptySectionPlaceholder("No recent captures.")
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SectionHeader("UPCOMING", fontSize = 11.sp, color = Color(0xFF6B7C6E), onViewAllClick = { onNavigateToReminders(LocalDate.now().plusDays(1).toString()) })
+                    if (state.upcomingItems.isNotEmpty()) {
+                        state.upcomingItems.take(5).forEach { item ->
+                            val deadline = item.deadline
+                            val daysLeft = if (deadline != null) {
+                                try {
+                                    ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                                } catch (e: Exception) { 0 }
+                            } else 0
+                            val icon = SourceIconProvider.getIconForSource(item.source)
+                            UpcomingTaskItem(
+                                title = item.title,
+                                subtitle = item.organization ?: item.source ?: "",
+                                tag = when {
+                                    daysLeft == 0L -> "Today"
+                                    daysLeft == 1L -> "1 day left"
+                                    daysLeft < 0 -> "Overdue"
+                                    else -> "$daysLeft days left"
+                                },
+                                iconRes = (icon as? SourceIcon.Resource)?.resId,
+                                icon = (icon as? SourceIcon.Vector)?.imageVector,
+                                titleSize = 14.sp,
+                                subtitleSize = 12.sp,
+                                onClick = { onNavigateToItem(item.id) }
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    } else {
+                        EmptySectionPlaceholder("No upcoming deadlines.")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
@@ -907,7 +1232,8 @@ fun ProTaskItem(
 @Composable
 fun CalendarStrip(items: List<Item>) {
     val today = LocalDate.now()
-    val days = (0..6).map { today.plusDays(it.toLong() - 2) }
+    val sunday = today.minusDays(today.dayOfWeek.value % 7L)
+    val days = (0..6).map { sunday.plusDays(it.toLong()) }
     
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -926,9 +1252,10 @@ fun CalendarStrip(items: List<Item>) {
                 val dayName = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
                 val dayOfMonth = date.dayOfMonth.toString()
                 
-                val hasItemsOnDay = items.any { 
-                    (it.deadline == date.toString() || it.eventDate == date.toString()) && 
-                    (date >= today)
+                val hasItemsOnDay = items.any { item ->
+                    val deadlineDate = item.deadline?.let { DateUtils.parseToDateTime(it).toLocalDate() }
+                    val eventDate = item.eventDate?.let { DateUtils.parseToDateTime(it).toLocalDate() }
+                    (deadlineDate == date || eventDate == date) && (date >= today)
                 }
 
                 Column(
@@ -970,16 +1297,41 @@ fun CalendarStrip(items: List<Item>) {
 }
 
 @Composable
-fun SectionHeader(title: String, fontSize: TextUnit = 11.sp, color: Color = Color.Gray) {
-    Text(
-        title.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        color = color,
-        letterSpacing = 1.2.sp,
-        modifier = Modifier.padding(bottom = 16.dp, top = 4.dp),
-        fontSize = fontSize
-    )
+fun SectionHeader(
+    title: String, 
+    fontSize: TextUnit = 11.sp, 
+    color: Color = Color.Gray,
+    onViewAllClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp, top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            letterSpacing = 1.2.sp,
+            fontSize = fontSize
+        )
+        if (onViewAllClick != null) {
+            TextButton(
+                onClick = onViewAllClick,
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+            ) {
+                Text(
+                    "View All",
+                    color = Color(0xFF2D6A4F),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1055,6 +1407,129 @@ fun TaskItem(
                         color = tagTextColor
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun UpcomingCarouselMedium(
+    items: List<Item>,
+    onNavigateToItem: (String) -> Unit = {}
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(end = 12.dp)
+    ) {
+        items(items.take(3)) { item ->
+            val deadline = item.deadline
+            val daysLeft = if (deadline != null) {
+                try {
+                    ChronoUnit.DAYS.between(LocalDate.now(), DateUtils.parseToDateTime(deadline).toLocalDate())
+                } catch (e: Exception) { 0 }
+            } else 0
+            val icon = SourceIconProvider.getIconForSource(item.source)
+            UpcomingTaskCard(
+                modifier = Modifier.width(220.dp),
+                title = item.title,
+                subtitle = item.organization ?: item.source ?: "",
+                tag = when {
+                    daysLeft == 0L -> "Today"
+                    daysLeft == 1L -> "1 day left"
+                    daysLeft < 0 -> "Overdue"
+                    else -> "$daysLeft days left"
+                },
+                iconRes = (icon as? SourceIcon.Resource)?.resId,
+                icon = (icon as? SourceIcon.Vector)?.imageVector,
+                onClick = { onNavigateToItem(item.id) }
+            )
+        }
+    }
+}
+
+@Composable
+fun UpcomingTaskCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    tag: String,
+    iconRes: Int? = null,
+    icon: ImageVector? = null,
+    onClick: () -> Unit = {}
+) {
+    Surface(
+        modifier = modifier
+            .height(110.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFFF9FAF9),
+        border = BorderStroke(1.dp, Color(0xFFEEEEEE))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.White
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (iconRes != null) {
+                            Icon(
+                                painter = painterResource(id = iconRes),
+                                contentDescription = null,
+                                tint = Color(0xFF2D6A4F),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        } else if (icon != null) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = Color(0xFF2D6A4F),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    color = Color(0xFF2D6A4F),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        tag,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            Column {
+                Text(
+                    title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF0D253F),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF91A5BA),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -1147,6 +1622,74 @@ fun UpcomingTaskItem(
 }
 
 @Composable
+fun HomeCategoryCard(
+    category: com.victorkirui.module_features.inbox.InboxCategory,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF9FAF9),
+        border = BorderStroke(1.dp, Color(0xFFEEEEEE))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFEAF2EE)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = when(category.iconType) {
+                        "work" -> Icons.Default.WorkOutline
+                        "school" -> Icons.Default.School
+                        "event" -> Icons.Default.Event
+                        "receipt" -> Icons.Default.Receipt
+                        "flight" -> Icons.Default.Flight
+                        "sync" -> Icons.Default.Sync
+                        "history" -> Icons.Default.History
+                        else -> Icons.Default.Category
+                    },
+                    contentDescription = null,
+                    tint = Color(0xFF2D6A4F),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    category.id,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = Color.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Surface(
+                color = Color(0xFF2D6A4F),
+                shape = CircleShape
+            ) {
+                Text(
+                    category.count.toString(),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun AnalysedSection(items: List<Item>, isPremium: Boolean = false, onNavigateToItem: (String) -> Unit = {}) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -1183,11 +1726,14 @@ fun AnalysedSection(items: List<Item>, isPremium: Boolean = false, onNavigateToI
 
 @Composable
 fun AnalysedSectionLarge(items: List<Item>, isPremium: Boolean = false, onNavigateToItem: (String) -> Unit = {}) {
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        items.take(3).forEach { item ->
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(end = 16.dp)
+    ) {
+        items(items.take(3)) { item ->
             val icon = SourceIconProvider.getIconForSource(item.source)
             AnalysedCard(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(180.dp),
                 title = item.title,
                 category = item.category ?: "Capture",
                 timeAgo = when (item.status) {
@@ -1342,18 +1888,22 @@ fun AnalysedCard(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isPremium) Color.White else categoryTextColor
+                    color = if (isPremium) Color.White else categoryTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 timeAgo,
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
                 fontSize = 10.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1473,11 +2023,15 @@ fun MonthCalendar(
                         val isToday = date == LocalDate.now()
                         val isPast = date.isBefore(LocalDate.now())
                         
-                        val itemsOnDay = items.filter { it.deadline == date.toString() || it.eventDate == date.toString() }
+                        val itemsOnDay = items.filter { item ->
+                            val deadlineDate = item.deadline?.let { DateUtils.parseToDateTime(it).toLocalDate() }
+                            val eventDate = item.eventDate?.let { DateUtils.parseToDateTime(it).toLocalDate() }
+                            deadlineDate == date || eventDate == date
+                        }
                         val hasDot = itemsOnDay.isNotEmpty() && !isPast
-                        val isUrgent = itemsOnDay.any { 
-                            val deadline = it.deadline
-                            deadline != null && ChronoUnit.DAYS.between(LocalDate.now(), LocalDate.parse(deadline)) <= 2
+                        val isUrgent = itemsOnDay.any { item ->
+                            val deadlineDate = item.deadline?.let { DateUtils.parseToDateTime(it).toLocalDate() }
+                            deadlineDate != null && ChronoUnit.DAYS.between(LocalDate.now(), deadlineDate) <= 2
                         }
 
                         Column(
@@ -1543,7 +2097,7 @@ fun HomeSmallScreenPreview() {
     }
 }
 
-@Preview(showBackground = true, device = FOLDABLE)
+@Preview(showBackground = true, device = "spec:width=673dp,height=841dp")
 @Composable
 fun HomeMediumScreenPreview() {
     RemindlyTheme {
@@ -1659,6 +2213,69 @@ fun SearchSheet(
     }
 }
 
+@Composable
+fun NotificationPermissionBanner(
+    onEnableClick: () -> Unit,
+    onDismissClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFEAF2EE),
+        border = BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2D6A4F).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        tint = Color(0xFF2D6A4F),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Turn On Notifications",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                    Text(
+                        text = "Enable alerts to stay updated on task deadlines.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.DarkGray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onEnableClick) {
+                    Text("Enable", color = Color(0xFF2D6A4F), fontWeight = FontWeight.Bold)
+                }
+                IconButton(onClick = onDismissClick, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Color.Gray)
+                }
+            }
+        }
+    }
+}
+
 private val PreviewHomeUiState = HomeUiState.Success(
     todayItems = listOf(
         Item(
@@ -1715,3 +2332,39 @@ private val PreviewHomeUiState = HomeUiState.Success(
     categoriesCount = 3,
     allItems = emptyList()
 )
+
+@Composable
+fun SyncLoadingDialog(message: String = "Syncing your saved items...") {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = { },
+        properties = androidx.compose.ui.window.DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(36.dp),
+                    color = Color(0xFF2D6A4F),
+                    strokeWidth = 3.dp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.Black
+                )
+            }
+        }
+    }
+}

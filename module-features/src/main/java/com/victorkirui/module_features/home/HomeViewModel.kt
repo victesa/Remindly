@@ -9,10 +9,12 @@ import androidx.work.WorkManager
 import com.victorkirui.core.monitoring.Analytics
 import com.victorkirui.core.repository.AuthRepository
 import com.victorkirui.core.repository.SubscriptionRepository
+import com.victorkirui.core.repository.SubscriptionTier
 import com.victorkirui.local.entity.Item
 import com.victorkirui.local.repository.LocalRepository
 import com.victorkirui.module_features.capturing.SyncDownWorker
 import com.victorkirui.module_features.capturing.SyncWorker
+import com.victorkirui.module_features.inbox.InboxCategory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -30,10 +32,14 @@ class HomeViewModel(
     private val workManager = WorkManager.getInstance(context)
 
     init {
-        // Trigger a sync and cleanup check on startup
+        // Trigger a local sync-up on startup
         SyncWorker.schedule(context)
         
         viewModelScope.launch {
+            val tier = subscriptionRepository.subscriptionTier.first()
+            if (tier == SubscriptionTier.PREMIUM) {
+                SyncDownWorker.schedule(context)
+            }
             authRepository.currentUser.value?.uid?.let { userId ->
                 localRepository.deleteExpiredItems(userId)
             }
@@ -65,12 +71,23 @@ class HomeViewModel(
 
     private val baseUiState: Flow<HomeUiState> = authRepository.currentUser
         .flatMapLatest { user ->
-            val userId = user?.uid ?: ""
-            val userName = user?.displayName ?: ""
-            val displayName = if (userName.isBlank()) "User" else userName
+            val firebaseUser = user ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            val userId = firebaseUser?.uid ?: ""
+            val rawUserName = firebaseUser?.displayName?.trim()
+            val emailPrefix = firebaseUser?.email?.substringBefore("@")?.trim()
+            val fallbackName = emailPrefix?.split(".", "_", "-")
+                ?.joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } }
+
+            val displayName = when {
+                !rawUserName.isNullOrBlank() -> rawUserName
+                !fallbackName.isNullOrBlank() -> fallbackName
+                else -> "User"
+            }
+
 
             if (userId.isEmpty()) {
-                flowOf(HomeUiState.Success(emptyList(), emptyList(), emptyList(), 0, emptyList(), userName = displayName))
+                Log.w("HomeViewModel", "No userId found for HomeViewModel baseUiState")
+                flowOf(HomeUiState.Loading)
             } else {
                 combine(
                     localRepository.getAllItems(userId),
@@ -78,11 +95,58 @@ class HomeViewModel(
                     subscriptionRepository.subscriptionTier,
                     subscriptionRepository.isCalendarSyncEnabled,
                     _searchQuery
-                ) { allItems, categories, tier, calendarSync, query ->
+                ) { allItems, allCategoryNames, tier, calendarSync, query ->
+                    Log.d("HomeViewModel", "combine triggered for userId='$userId': totalInDb=${allItems.size}, categoriesInDb=$allCategoryNames")
                     val today = LocalDate.now()
                     
                     // Filter out items marked as DONE for the main view
                     val activeAndPendingItems = allItems.filter { it.status != "DONE" }
+
+                    val categoryList = mutableListOf<InboxCategory>()
+                    val activeItems = allItems.filter { it.status != "DONE" && it.status != "PENDING" }
+                    val pendingItems = allItems.filter { it.status == "PENDING" }
+                    
+                    if (pendingItems.isNotEmpty()) {
+                        categoryList.add(
+                            InboxCategory(
+                                id = "PENDING_SYNC",
+                                latestItemTitle = pendingItems.first().title,
+                                count = pendingItems.size,
+                                hasPendingSync = true,
+                                iconType = "sync"
+                            )
+                        )
+                    }
+                    
+                    allCategoryNames.forEach { name ->
+                        val itemsInCategory = activeItems.filter { it.category == name }
+                        val hasPendingInCategory = allItems.any { it.category == name && it.status == "PENDING" }
+                        
+                        if (itemsInCategory.isNotEmpty() || hasPendingInCategory) {
+                            categoryList.add(
+                                InboxCategory(
+                                    id = name,
+                                    latestItemTitle = itemsInCategory.firstOrNull()?.title ?: "Syncing...",
+                                    count = itemsInCategory.size,
+                                    hasPendingSync = hasPendingInCategory,
+                                    iconType = getIconForCategory(name)
+                                )
+                            )
+                        }
+                    }
+
+                    val uncategorized = activeItems.filter { it.category.isNullOrBlank() }
+                    if (uncategorized.isNotEmpty()) {
+                        categoryList.add(
+                            InboxCategory(
+                                id = "UNCATEGORIZED",
+                                latestItemTitle = uncategorized.first().title,
+                                count = uncategorized.size,
+                                hasPendingSync = false,
+                                iconType = "category"
+                            )
+                        )
+                    }
 
                     // Apply search filter if query is not blank
                     val filteredItems = if (query.isBlank()) {
@@ -132,6 +196,7 @@ class HomeViewModel(
                         upcomingItems = upcomingItems,
                         categoriesCount = activeAndPendingItems.size,
                         allItems = activeAndPendingItems,
+                        categories = categoryList,
                         userName = displayName,
                         searchResults = if (query.isBlank()) emptyList() else filteredItems,
                         searchQuery = query,
@@ -151,8 +216,8 @@ class HomeViewModel(
         }
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = HomeUiState.Success(emptyList(), emptyList(), emptyList(), 0, emptyList())
+        started = SharingStarted.Lazily,
+        initialValue = HomeUiState.Loading
     )
 
     fun onSearchQueryChange(newQuery: String) {
@@ -174,15 +239,20 @@ class HomeViewModel(
     }
 
     private fun parseDate(dateStr: String): LocalDate {
-        return if (dateStr.contains("T")) {
-            if (dateStr.endsWith("Z")) {
-                java.time.Instant.parse(dateStr).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-            } else {
-                java.time.LocalDateTime.parse(dateStr).toLocalDate()
-            }
-        } else {
-            LocalDate.parse(dateStr)
+        return try {
+            com.victorkirui.core.util.DateUtils.parseToDateTime(dateStr).toLocalDate()
+        } catch (e: Exception) {
+            LocalDate.now()
         }
+    }
+
+    private fun getIconForCategory(name: String): String = when(name.lowercase()) {
+        "jobs", "work", "career" -> "work"
+        "scholarships", "school", "education" -> "school"
+        "travel", "flights", "trip" -> "flight"
+        "events", "meetups" -> "event"
+        "bills", "receipts", "finance" -> "receipt"
+        else -> "category"
     }
 }
 
@@ -194,6 +264,7 @@ sealed class HomeUiState {
         val upcomingItems: List<Item>,
         val categoriesCount: Int,
         val allItems: List<Item>,
+        val categories: List<InboxCategory> = emptyList(),
         val userName: String = "User",
         val searchResults: List<Item> = emptyList(),
         val searchQuery: String = "",
