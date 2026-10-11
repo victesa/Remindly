@@ -52,17 +52,40 @@ class LocalRepositoryImpl(
     }
 
     override suspend fun findDuplicate(userId: String, url: String?, text: String?): Item? {
-        val cleanUrl = url?.trim()?.takeIf { it.isNotBlank() }
+        val cleanUrl = normalizeUrl(url)
         val cleanText = text?.trim()?.takeIf { it.isNotBlank() && it.length >= 15 }
         if (cleanUrl == null && cleanText == null) return null
+
+        val exactMatch = itemDao.findDuplicate(userId, url?.trim(), cleanText)
+        if (exactMatch != null) return exactMatch
+
         return itemDao.findDuplicate(userId, cleanUrl, cleanText)
     }
 
     override suspend fun findDuplicateEx(userId: String, url: String?, text: String?, title: String?): Item? {
-        val cleanUrl = url?.trim()?.takeIf { it.isNotBlank() }
+        val cleanUrl = normalizeUrl(url)
         val cleanText = text?.trim()?.takeIf { it.isNotBlank() && it.length >= 15 }
-        if (cleanUrl == null && cleanText == null) return null
-        return itemDao.findDuplicateEx(userId, cleanUrl, cleanText, null)
+        val cleanTitle = title?.trim()?.takeIf { it.isNotBlank() && it != "Analysing..." && it != "Untitled" && it != "Saved Offline" }
+        if (cleanUrl == null && cleanText == null && cleanTitle == null) return null
+
+        val exactMatch = itemDao.findDuplicateEx(userId, url?.trim(), cleanText, cleanTitle)
+        if (exactMatch != null) return exactMatch
+
+        return itemDao.findDuplicateEx(userId, cleanUrl, cleanText, cleanTitle)
+    }
+
+    private fun normalizeUrl(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val clean = url.trim()
+        return try {
+            val uri = android.net.Uri.parse(clean)
+            val scheme = uri.scheme?.lowercase() ?: "https"
+            val host = uri.host?.lowercase()?.removePrefix("www.") ?: return clean
+            val path = uri.path?.trimEnd('/') ?: ""
+            "$scheme://$host$path"
+        } catch (_: Exception) {
+            clean
+        }
     }
 
     override suspend fun addPendingSync(sync: PendingSync) {

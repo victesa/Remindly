@@ -207,6 +207,17 @@ class CapturingUseCase(
                     )
                 )
 
+                // Post-AI Title Deduplication Safeguard:
+                // Only merge if titles match AND at least one item lacks a URL (e.g. text/image capture vs link).
+                // If two captures have DIFFERENT non-empty URLs (e.g. Job 101 vs Job 102), NEVER merge them!
+                val existingByTitle = if (result.title.isNotBlank() && result.title != "Untitled") {
+                    localRepository.getAllItemsSyncForUser(userId).find { existing ->
+                        existing.id != initialItem.id &&
+                        existing.title.trim().equals(result.title.trim(), ignoreCase = true) &&
+                        (existing.sourceUrl.isNullOrBlank() || sourceUrl.isNullOrBlank() || existing.sourceUrl == sourceUrl)
+                    }
+                } else null
+
                 localRepository.withTransaction {
                     // Remove temporary local item and any duplicate local item
                     localRepository.deleteItem(userId, initialItem.id)
@@ -214,8 +225,20 @@ class CapturingUseCase(
                     if (localDup != null && localDup.id != updatedItem.id) {
                         localRepository.deleteItem(userId, localDup.id)
                     }
-                    localRepository.saveItem(updatedItem)
-                    reminderScheduler.scheduleRemindersForItem(updatedItem)
+
+                    if (existingByTitle != null && existingByTitle.id != updatedItem.id) {
+                        Log.d("CapturingUseCase", "Post-AI Deduplication: Content title '${result.title}' matches existing item ${existingByTitle.id}")
+                        val mergedItem = existingByTitle.copy(
+                            summary = result.summary ?: existingByTitle.summary,
+                            deadline = cleanDeadline ?: existingByTitle.deadline,
+                            eventDate = cleanEventDate ?: existingByTitle.eventDate,
+                            checklist = result.checklist ?: existingByTitle.checklist
+                        )
+                        localRepository.saveItem(mergedItem)
+                    } else {
+                        localRepository.saveItem(updatedItem)
+                        reminderScheduler.scheduleRemindersForItem(updatedItem)
+                    }
                     localRepository.removePendingSync(initialItem.id)
                 }
 
