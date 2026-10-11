@@ -113,11 +113,12 @@ class SubscriptionRepositoryImpl(
         val activeUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
         context.subscriptionDataStore.edit { preferences ->
             val currentTierName = preferences[TIER_KEY] ?: SubscriptionTier.FREE.name
-            if (tier == SubscriptionTier.PREMIUM) {
+            if (currentTierName == SubscriptionTier.FREE.name && tier == SubscriptionTier.PREMIUM) {
                 preferences[PRO_CELEBRATION_KEY] = true
                 isNewUpgrade = true
             } else if (currentTierName == SubscriptionTier.PREMIUM.name && tier == SubscriptionTier.FREE) {
                 preferences[PRO_EXPIRATION_KEY] = true
+                preferences[PRO_CELEBRATION_KEY] = false
             }
             preferences[TIER_KEY] = tier.name
             if (activeUid.isNotEmpty()) {
@@ -164,19 +165,19 @@ class SubscriptionRepositoryImpl(
         val activeUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
         context.subscriptionDataStore.edit { preferences ->
             val currentTierName = preferences[TIER_KEY] ?: SubscriptionTier.FREE.name
-            if (tier == SubscriptionTier.FREE) {
-                if (currentTierName == SubscriptionTier.PREMIUM.name) {
-                    preferences[PRO_EXPIRATION_KEY] = true
+            if (currentTierName == SubscriptionTier.FREE.name && tier == SubscriptionTier.PREMIUM) {
+                preferences[PRO_CELEBRATION_KEY] = true
+                val lim = preferences[QUOTA_LIMIT_KEY] ?: 10
+                if (lim < 250) {
+                    preferences[QUOTA_LIMIT_KEY] = 250
                 }
+            } else if (currentTierName == SubscriptionTier.PREMIUM.name && tier == SubscriptionTier.FREE) {
+                preferences[PRO_EXPIRATION_KEY] = true
+                preferences[PRO_CELEBRATION_KEY] = false
                 preferences[QUOTA_LIMIT_KEY] = 10
                 val rem = preferences[QUOTA_REMAINING_KEY] ?: 10
                 if (rem > 10) {
                     preferences[QUOTA_REMAINING_KEY] = 10
-                }
-            } else if (tier == SubscriptionTier.PREMIUM) {
-                val lim = preferences[QUOTA_LIMIT_KEY] ?: 10
-                if (lim < 250) {
-                    preferences[QUOTA_LIMIT_KEY] = 250
                 }
             }
             preferences[TIER_KEY] = tier.name
