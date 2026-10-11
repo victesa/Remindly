@@ -31,6 +31,9 @@ class HomeViewModel(
 
     private val workManager = WorkManager.getInstance(context)
 
+    private val _showProAd = MutableStateFlow(false)
+    val showProAd = _showProAd.asStateFlow()
+
     init {
         // Trigger a local sync-up on startup
         SyncWorker.schedule(context)
@@ -39,11 +42,20 @@ class HomeViewModel(
             val tier = subscriptionRepository.subscriptionTier.first()
             if (tier == SubscriptionTier.PREMIUM) {
                 SyncDownWorker.schedule(context)
+            } else {
+                if (subscriptionRepository.shouldShowProAd()) {
+                    _showProAd.value = true
+                    subscriptionRepository.recordProAdShown()
+                }
             }
             authRepository.currentUser.value?.uid?.let { userId ->
                 localRepository.deleteExpiredItems(userId)
             }
         }
+    }
+
+    fun dismissProAd() {
+        _showProAd.value = false
     }
 
     private val _searchQuery = MutableStateFlow("")

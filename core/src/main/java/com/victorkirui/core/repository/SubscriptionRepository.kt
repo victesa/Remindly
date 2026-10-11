@@ -52,6 +52,9 @@ interface SubscriptionRepository : com.victorkirui.core.data.DataClearer {
 
     val isInitialSyncPending: Flow<Boolean>
     suspend fun setInitialSyncPending(pending: Boolean)
+
+    suspend fun shouldShowProAd(): Boolean
+    suspend fun recordProAdShown()
 }
 
 class SubscriptionRepositoryImpl(
@@ -68,6 +71,8 @@ class SubscriptionRepositoryImpl(
     private val PRO_EXPIRATION_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("pending_pro_expiration")
     private val LAST_SYNCED_AT_KEY = stringPreferencesKey("last_synced_at")
     private val INITIAL_SYNC_PENDING_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("initial_sync_pending")
+    private val LAST_PRO_AD_SHOWN_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_pro_ad_shown_timestamp")
+    private val APP_LAUNCH_COUNT_KEY = androidx.datastore.preferences.core.intPreferencesKey("pro_ad_launch_count")
 
     override val isInitialSyncPending: Flow<Boolean> = context.subscriptionDataStore.data.map { preferences ->
         preferences[INITIAL_SYNC_PENDING_KEY] ?: false
@@ -192,6 +197,31 @@ class SubscriptionRepositoryImpl(
         context.subscriptionDataStore.edit { preferences ->
             val current = preferences[IMAGE_COUNT_KEY] ?: 0
             preferences[IMAGE_COUNT_KEY] = current + 1
+        }
+    }
+
+    override suspend fun shouldShowProAd(): Boolean {
+        return try {
+            val prefs = context.subscriptionDataStore.data.first()
+            val tierName = prefs[TIER_KEY] ?: SubscriptionTier.FREE.name
+            if (tierName == SubscriptionTier.PREMIUM.name) return false
+
+            val currentCount = (prefs[APP_LAUNCH_COUNT_KEY] ?: 0) + 1
+            context.subscriptionDataStore.edit { it[APP_LAUNCH_COUNT_KEY] = currentCount }
+
+            val lastShown = prefs[LAST_PRO_AD_SHOWN_KEY] ?: 0L
+            val now = System.currentTimeMillis()
+            val fourDaysMillis = 4 * 24 * 60 * 60 * 1000L
+
+            (currentCount >= 5 && currentCount % 5 == 0) || (lastShown > 0L && now - lastShown > fourDaysMillis)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override suspend fun recordProAdShown() {
+        context.subscriptionDataStore.edit { preferences ->
+            preferences[LAST_PRO_AD_SHOWN_KEY] = System.currentTimeMillis()
         }
     }
 

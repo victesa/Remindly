@@ -62,6 +62,17 @@ fun HomeScreen(
     viewModel: HomeViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val showProAd by viewModel.showProAd.collectAsState()
+
+    if (showProAd) {
+        com.victorkirui.module_features.subscription.ProPromoAdDialog(
+            onUpgradeClick = {
+                viewModel.dismissProAd()
+                onNavigateToProfile()
+            },
+            onDismiss = { viewModel.dismissProAd() }
+        )
+    }
 
     HomeScreen(
         uiState = uiState,
@@ -213,8 +224,8 @@ fun RemindlyTopBar(onSearchToggle: () -> Unit = {}, isSearchActive: Boolean = fa
                 color = Color(0xFF2D6A4F),
                 letterSpacing = (-0.5).sp
             )
+            Spacer(modifier = Modifier.width(8.dp))
             if (subscriptionTier == com.victorkirui.core.repository.SubscriptionTier.PREMIUM) {
-                Spacer(modifier = Modifier.width(8.dp))
                 Surface(
                     color = Color(0xFFB8860B),
                     shape = RoundedCornerShape(8.dp)
@@ -224,6 +235,20 @@ fun RemindlyTopBar(onSearchToggle: () -> Unit = {}, isSearchActive: Boolean = fa
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         color = Color.White,
                         fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Surface(
+                    color = Color(0xFFEAF2EE),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF2D6A4F).copy(alpha = 0.3f))
+                ) {
+                    Text(
+                        "FREE",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color(0xFF2D6A4F),
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }

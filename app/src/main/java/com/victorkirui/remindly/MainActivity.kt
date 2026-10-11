@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
                     if (pendingPromoCode != null) {
                         com.victorkirui.module_features.subscription.CustomPromoOfferDialog(
                             promoCode = pendingPromoCode ?: "ANDROID254",
-                            title = pendingPromoTitle ?: "Special Offer Unlocked! 🎁",
+                            title = pendingPromoTitle ?: "Special Offer Unlocked!",
                             message = pendingPromoMessage ?: "Claim your exclusive Remindly Pro upgrade!",
                             onDismiss = {
                                 pendingPromoCode = null
@@ -165,7 +165,7 @@ class MainActivity : ComponentActivity() {
             val promoCode = extras.getString("PROMO_CODE")
             if (showPromo) {
                 pendingPromoCode = promoCode ?: "ANDROID254"
-                pendingPromoTitle = extras.getString("PROMO_TITLE") ?: "Special Offer Unlocked! 🎁"
+                pendingPromoTitle = extras.getString("PROMO_TITLE") ?: "Special Offer Unlocked!"
                 pendingPromoMessage = extras.getString("PROMO_MESSAGE") ?: "Claim your exclusive Remindly Pro upgrade!"
             }
 

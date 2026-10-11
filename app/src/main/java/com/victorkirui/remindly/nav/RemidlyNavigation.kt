@@ -564,7 +564,7 @@ fun ProPerksCelebrationDialog(
         },
         title = {
             Text(
-                "Welcome to Remindly Pro! 🎉",
+                "Welcome to Remindly Pro!",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 20.sp,
                 textAlign = TextAlign.Center,

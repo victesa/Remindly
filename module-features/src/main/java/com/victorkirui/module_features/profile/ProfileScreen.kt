@@ -211,6 +211,7 @@ fun ProfileScreenContent(
     onToggleCalendarSync: (Boolean) -> Unit = {},
     onShowWidgetsGallery: () -> Unit = {},
     onUpgrade: () -> Unit = {},
+    onShowProAdPreview: () -> Unit = {},
     onShowWalkthrough: () -> Unit = {}
 ) {
     Scaffold(

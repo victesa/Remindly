@@ -31,7 +31,7 @@ import androidx.compose.ui.window.Dialog
 @Composable
 fun CustomPromoOfferDialog(
     promoCode: String = "ANDROID254",
-    title: String = "Special Offer Unlocked! 🎁",
+    title: String = "Special Offer Unlocked!",
     message: String = "Claim your exclusive Remindly Pro upgrade using this official promo code.",
     onDismiss: () -> Unit
 ) {

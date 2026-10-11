@@ -177,7 +177,7 @@ class NotificationHelper(private val context: Context) {
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Monthly Capture Limit Reached ⚠️")
+            .setContentTitle("Monthly Capture Limit Reached")
             .setContentText("You've reached your monthly AI extraction limit. Upgrade to Remindly Pro for 250 monthly extractions.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)

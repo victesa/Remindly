@@ -40,7 +40,7 @@ class RemindlyFirebaseMessagingService : FirebaseMessagingService(), KoinCompone
             ?: data["message"]
 
         if (!title.isNullOrBlank() || !body.isNullOrBlank()) {
-            val finalTitle = title ?: "Special Offer Unlocked! 🎁"
+            val finalTitle = title ?: "Special Offer Unlocked!"
             val finalBody = body ?: "Claim your exclusive Remindly Pro upgrade!"
             Log.d("FCMService", "Displaying FCM promo notification: $finalTitle - $finalBody, code: $promoCode")
 
