@@ -14,19 +14,20 @@ android {
         applicationId = "com.victorkirui.remindly"
         minSdk = 24
         targetSdk = 37
-        versionCode = 30
-        versionName = "2.2.1"
+        versionCode = 32
+        versionName = "2.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
 
             ndk {
                 debugSymbolLevel = "SYMBOL_TABLE" // or 'FULL'

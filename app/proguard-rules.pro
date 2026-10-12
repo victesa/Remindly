@@ -14,11 +14,20 @@
 -keep class com.victorkirui.local.entity.** { *; }
 -keepclassmembers class com.victorkirui.local.entity.** { *; }
 
--keep class com.victorkirui.module_features.capturing.ai.** { *; }
--keepclassmembers class com.victorkirui.module_features.capturing.ai.** { *; }
-
 -keep class com.victorkirui.remote.** { *; }
 -keepclassmembers class com.victorkirui.remote.** { *; }
+
+-keep class com.victorkirui.module_features.**.data.** { *; }
+-keepclassmembers class com.victorkirui.module_features.**.data.** { *; }
+
+-keep class com.victorkirui.module_features.**.model.** { *; }
+-keepclassmembers class com.victorkirui.module_features.**.model.** { *; }
+
+-keep class com.victorkirui.module_features.**.dto.** { *; }
+-keepclassmembers class com.victorkirui.module_features.**.dto.** { *; }
+
+-keep class com.victorkirui.module_features.capturing.ai.** { *; }
+-keepclassmembers class com.victorkirui.module_features.capturing.ai.** { *; }
 
 # 2. VIEWMODELS & USECASES
 -keep class * extends androidx.lifecycle.ViewModel { *; }
@@ -55,6 +64,11 @@
 -dontwarn com.google.gson.**
 -keep class com.google.gson.** { *; }
 -keepclassmembers class com.google.gson.** { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken { *; }
+-keepclassmembers class * extends com.google.gson.reflect.TypeToken { *; }
+-keep class com.google.gson.stream.** { *; }
+-keep class sun.misc.Unsafe { *; }
 -keepclassmembers class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
