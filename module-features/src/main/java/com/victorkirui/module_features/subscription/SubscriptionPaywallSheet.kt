@@ -1,6 +1,9 @@
 package com.victorkirui.module_features.subscription
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -273,7 +276,7 @@ fun SubscriptionPaywallContent(
             onSelectFree = onSelectFree
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Footer / Skip Action
         TextButton(onClick = onSelectFree) {
@@ -288,6 +291,8 @@ fun SubscriptionPaywallContent(
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
+
+
 
 @Composable
 private fun BillingCycleToggle(

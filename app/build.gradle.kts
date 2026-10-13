@@ -14,8 +14,8 @@ android {
         applicationId = "com.victorkirui.remindly"
         minSdk = 24
         targetSdk = 37
-        versionCode = 32
-        versionName = "2.2.3"
+        versionCode = 40
+        versionName = "2.2.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

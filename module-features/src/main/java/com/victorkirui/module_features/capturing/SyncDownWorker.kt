@@ -79,13 +79,16 @@ class SyncDownWorker(
         }
 
         return try {
-            val lastSyncedAt = subscriptionRepository.lastSyncedAt.first()
+            val localCount = localRepository.getAllItemsSyncForUser(userId).size
+            val storedLastSyncedAt = subscriptionRepository.lastSyncedAt.first()
+            val lastSyncedAt = if (localCount == 0) null else storedLastSyncedAt
+
             val remoteItems: List<com.victorkirui.core.model.StoredReminderItem>
             val deletedIds: List<String>
             val newSyncTimestamp: String?
 
             if (lastSyncedAt.isNullOrBlank()) {
-                Log.d(TAG, "No lastSyncedAt checkpoint found for user $userId (Initial Sync on Sign-In). Calling GET /v1/items/sync without since parameter...")
+                Log.d(TAG, "No valid lastSyncedAt checkpoint or empty local DB for user $userId (Initial Sync). Calling GET /v1/items/sync without since parameter...")
                 val deltaResponse = try {
                     captureApiService.getSyncDeltas(null)
                 } catch (e: Exception) {

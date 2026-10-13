@@ -24,13 +24,11 @@ class RemindlyFirebaseMessagingService : FirebaseMessagingService(), KoinCompone
         val data = remoteMessage.data
         val action = data["action"]
         val grantPro = data["grant_pro"]
-        val promoCode = data["promo_code"] ?: data["code"] ?: "ANDROID254"
 
         if (action == "REFRESH_PRO_TIER" || grantPro == "true") {
             Log.d("FCMService", "Received Pro tier refresh signal via FCM. Scheduling SyncDownWorker...")
             SyncDownWorker.schedule(applicationContext)
         }
-
         val title = remoteMessage.notification?.title
             ?: data["title"]
             ?: data["heading"]
@@ -40,15 +38,13 @@ class RemindlyFirebaseMessagingService : FirebaseMessagingService(), KoinCompone
             ?: data["message"]
 
         if (!title.isNullOrBlank() || !body.isNullOrBlank()) {
-            val finalTitle = title ?: "Special Offer Unlocked!"
-            val finalBody = body ?: "Claim your exclusive Remindly Pro upgrade!"
-            Log.d("FCMService", "Displaying FCM promo notification: $finalTitle - $finalBody, code: $promoCode")
+            val finalTitle = title ?: "Remindly Update"
+            val finalBody = body ?: "Open Remindly to check your captures and reminders."
+            Log.d("FCMService", "Displaying FCM notification: $finalTitle - $finalBody")
 
-            notificationHelper.showPromoNotification(
+            notificationHelper.showNotification(
                 title = finalTitle,
-                message = finalBody,
-                promoCode = promoCode,
-                showDialog = true
+                message = finalBody
             )
         }
     }

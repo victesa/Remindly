@@ -69,6 +69,14 @@ class RemindlyApp : Application() {
             }
         }
 
+        // Subscribe device to 'all_users' topic for instant campaign delivery
+        com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("all_users")
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    android.util.Log.d("RemindlyApp", "Successfully subscribed to FCM topic 'all_users'")
+                }
+            }
+
 
         // Schedule periodic background entitlement revalidation with backend (every 12 hours)
         com.victorkirui.module_features.subscription.EntitlementRevalidationWorker.schedule(this)

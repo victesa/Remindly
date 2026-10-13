@@ -19,6 +19,7 @@ import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -47,9 +48,6 @@ class MainActivity : ComponentActivity() {
     private var pendingOpenCapture by mutableStateOf(false)
     private var pendingSelectedDate by mutableStateOf<String?>(null)
     private var pendingOpenPaywall by mutableStateOf(false)
-    private var pendingPromoCode by mutableStateOf<String?>(null)
-    private var pendingPromoTitle by mutableStateOf<String?>(null)
-    private var pendingPromoMessage by mutableStateOf<String?>(null)
 
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -121,6 +119,17 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                     
+                    var showPaywallDirectly by remember { mutableStateOf(false) }
+
+                    if (showPaywallDirectly) {
+                        com.victorkirui.module_features.subscription.SubscriptionPaywallSheet(
+                            onDismiss = { showPaywallDirectly = false },
+                            onPlanSelected = { tier ->
+                                showPaywallDirectly = false
+                            }
+                        )
+                    }
+                    
                     CapturingDialog(
                         uiState = uiState,
                         onDismiss = { 
@@ -128,22 +137,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onViewPlans = {
                             capturingViewModel.resetState()
-                            pendingOpenPaywall = true
+                            showPaywallDirectly = true
                         }
                     )
-
-                    if (pendingPromoCode != null) {
-                        com.victorkirui.module_features.subscription.CustomPromoOfferDialog(
-                            promoCode = pendingPromoCode ?: "ANDROID254",
-                            title = pendingPromoTitle ?: "Special Offer Unlocked!",
-                            message = pendingPromoMessage ?: "Claim your exclusive Remindly Pro upgrade!",
-                            onDismiss = {
-                                pendingPromoCode = null
-                                pendingPromoTitle = null
-                                pendingPromoMessage = null
-                            }
-                        )
-                    }
                 }
             }
         }
@@ -161,13 +157,6 @@ class MainActivity : ComponentActivity() {
         }
         val extras = intent?.extras
         if (extras != null) {
-            val showPromo = extras.getBoolean("SHOW_PROMO_DIALOG", false)
-            val promoCode = extras.getString("PROMO_CODE")
-            if (showPromo) {
-                pendingPromoCode = promoCode ?: "ANDROID254"
-                pendingPromoTitle = extras.getString("PROMO_TITLE") ?: "Special Offer Unlocked!"
-                pendingPromoMessage = extras.getString("PROMO_MESSAGE") ?: "Claim your exclusive Remindly Pro upgrade!"
-            }
 
             val directItemId = extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.EXTRA_ITEM_ID)
                 ?: extras.getString(com.victorkirui.remindly.widget.WidgetIntentConstants.PARAM_ITEM_ID.name)

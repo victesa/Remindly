@@ -130,11 +130,36 @@ class BillingManager(
         productDetails: ProductDetails,
         basePlanId: String = BASE_PLAN_MONTHLY
     ): Boolean {
-        val offerDetails = productDetails.subscriptionOfferDetails?.find {
-            it.basePlanId == basePlanId
-        } ?: productDetails.subscriptionOfferDetails?.firstOrNull()
+        val allOffers = productDetails.subscriptionOfferDetails ?: emptyList()
+        
+        allOffers.forEach { offer ->
+            Log.d(TAG, "Available Subscription Offer: basePlanId=${offer.basePlanId}, offerId=${offer.offerId}, tags=${offer.offerTags}, token=${offer.offerToken.take(15)}...")
+        }
 
-        val offerToken = offerDetails?.offerToken ?: ""
+        // 1. Prefer free trial or promotional offer for the requested basePlanId
+        var selectedOffer = allOffers.find { offer ->
+            offer.basePlanId == basePlanId && offer.pricingPhases.pricingPhaseList.any { phase ->
+                phase.priceAmountMicros == 0L
+            }
+        }
+
+        // 2. Fallback to any offer under basePlanId that has an offerId
+        if (selectedOffer == null) {
+            selectedOffer = allOffers.find { it.basePlanId == basePlanId && !it.offerId.isNullOrBlank() }
+        }
+
+        // 3. Fallback to standard basePlanId
+        if (selectedOffer == null) {
+            selectedOffer = allOffers.find { it.basePlanId == basePlanId }
+        }
+
+        // 4. Fallback to first available offer
+        if (selectedOffer == null) {
+            selectedOffer = allOffers.firstOrNull()
+        }
+
+        val offerToken = selectedOffer?.offerToken ?: ""
+        Log.d(TAG, "Selected offerToken for launchBillingFlow: basePlanId=${selectedOffer?.basePlanId}, offerId=${selectedOffer?.offerId}, token=${offerToken.take(15)}...")
 
         val productDetailsParamsList = listOf(
             BillingFlowParams.ProductDetailsParams.newBuilder()
